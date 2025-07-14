@@ -16,7 +16,7 @@
 		"test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --coverage",
 		"test:e2e": "./tests/e2e/run_e2e.sh",
 		"test:e2e-report": "./tests/e2e/run_e2e.sh --analyze-log",
-		"prepare": "chmod +x bin/task-master.js mcp-server/server.js",
+		"prepare": "shx chmod +x bin/task-master.js mcp-server/server.js",
 		"changeset": "changeset",
 		"release": "changeset publish",
 		"inspector": "npx @modelcontextprotocol/inspector node mcp-server/server.js",
@@ -83,8 +83,8 @@
 	},
 	"optionalDependencies": {
 		"@anthropic-ai/claude-code": "^1.0.25",
-		"ai-sdk-provider-gemini-cli": "^0.0.4",
-		"@biomejs/cli-linux-x64": "^1.9.4"
+		"@biomejs/cli-linux-x64": "^1.9.4",
+		"ai-sdk-provider-gemini-cli": "^0.0.4"
 	},
 	"engines": {
 		"node": ">=18.0.0"
@@ -123,6 +123,7 @@
 		"mock-fs": "^5.5.0",
 		"prettier": "^3.5.3",
 		"react": "^18.3.1",
+		"shx": "^0.4.0",
 		"supertest": "^7.1.0",
 		"tsx": "^4.16.2"
 	}
