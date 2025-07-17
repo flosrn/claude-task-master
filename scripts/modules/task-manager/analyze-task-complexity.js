@@ -22,6 +22,7 @@ import {
 import { ContextGatherer } from '../utils/contextGatherer.js';
 import { FuzzyTaskSearch } from '../utils/fuzzyTaskSearch.js';
 import { flattenTasksWithSubtasks } from '../utils.js';
+import { updateNotionComplexityForCurrentTag } from '../notion.js';
 
 /**
  * Generates the prompt for complexity analysis.
@@ -49,12 +50,12 @@ ${tasksString}`;
 Respond ONLY with a valid JSON array matching the schema:
 [
   {
-    "taskId": <number>,
-    "taskTitle": "<string>",
-    "complexityScore": <number 1-10>,
-    "recommendedSubtasks": <number>,
-    "expansionPrompt": "<string>",
-    "reasoning": "<string>"
+	"taskId": <number>,
+	"taskTitle": "<string>",
+	"complexityScore": <number 1-10>,
+	"recommendedSubtasks": <number>,
+	"expansionPrompt": "<string>",
+	"reasoning": "<string>"
   },
   ...
 ]
@@ -579,6 +580,12 @@ async function analyzeTaskComplexity(options, context = {}) {
 			};
 			reportLog(`Writing complexity report to ${outputPath}...`, 'info');
 			fs.writeFileSync(outputPath, JSON.stringify(report, null, '\t'), 'utf8');
+
+			try {
+				await updateNotionComplexityForCurrentTag(projectRoot, true);
+			} catch (notionErr) {
+				console.warn(`Warning: Failed to update Notion complexity: ${notionErr.message}`);
+			}
 
 			reportLog(
 				`Task complexity analysis complete. Report written to ${outputPath}`,
