@@ -582,7 +582,7 @@ async function analyzeTaskComplexity(options, context = {}) {
 			fs.writeFileSync(outputPath, JSON.stringify(report, null, '\t'), 'utf8');
 
 			try {
-				await updateNotionComplexityForCurrentTag(projectRoot, false);
+				await updateNotionComplexityForCurrentTag(projectRoot);
 			} catch (notionErr) {
 				console.warn(`Warning: Failed to update Notion complexity: ${notionErr.message}`);
 			}

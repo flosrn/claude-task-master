@@ -316,8 +316,7 @@ async function parsePRD(prdPath, tasksPath, numTasks, options = {}) {
 				syncTasksWithNotion(
 					{},
 					outputData,
-					projectRoot,
-					{ debug: false }
+					projectRoot
 				);
 			} catch (e) {
 				console.warn('syncTasksWithNotion debug failed:', e);
