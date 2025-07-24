@@ -38,10 +38,9 @@ import { registerRenameTagTool } from './rename-tag.js';
 import { registerCopyTagTool } from './copy-tag.js';
 import { registerResearchTool } from './research.js';
 import { registerRulesTool } from './rules.js';
-import { registerRepairNotionDuplicatesTool } from './repair-notion-duplicates.js';
 import { registerValidateNotionSyncTool } from './validate-notion-sync.js';
-import { registerForceNotionSyncTool } from './force-notion-sync.js';
 import { registerResetNotionTool } from './reset-notion.js';
+import { registerRepairNotionTool } from './repair-notion.js';
 
 /**
  * Register all Task Master tools with the MCP server
@@ -103,8 +102,7 @@ export function registerTaskMasterTools(server) {
 
 		// Group 9: Notion Sync & Repair
 		registerValidateNotionSyncTool(server);
-		registerRepairNotionDuplicatesTool(server);
-		registerForceNotionSyncTool(server);
+		registerRepairNotionTool(server);
 		registerResetNotionTool(server);
 	} catch (error) {
 		logger.error(`Error registering Task Master tools: ${error.message}`);

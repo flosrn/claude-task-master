@@ -5,60 +5,10 @@
 
 import path from 'path';
 import { log } from './utils.js';
-import { repairNotionDuplicates, validateNotionSync, forceFullNotionSync, resetNotionDatabase } from './notion.js';
+import { validateNotionSync, resetNotionDatabase, repairNotion } from './notion.js';
 import { initTaskMaster } from '../../src/task-master.js';
 import chalk from 'chalk';
 
-/**
- * Command to repair Notion database duplicates
- * @param {Object} options - Command options
- */
-export async function repairNotionDuplicatesCommand(options = {}) {
-    const { dryRun = false, forceSync = true, projectRoot: providedRoot } = options;
-    
-    try {
-        const taskMaster = await initTaskMaster(providedRoot);
-        const projectRoot = taskMaster.getProjectRoot();
-        
-        if (!projectRoot) {
-            log('error', 'REPAIR', 'Project root not found. Please run this command from a TaskMaster project directory.');
-            process.exit(1);
-        }
-
-        log('info', 'REPAIR', `${dryRun ? '[DRY RUN] ' : ''}Starting Notion duplicate repair...`);
-        
-        const result = await repairNotionDuplicates(projectRoot, { dryRun, forceSync });
-        
-        if (result.success) {
-            if (result.duplicatesRemoved === 0) {
-                log('success', 'REPAIR', 'No duplicates found in Notion database');
-            } else {
-                const message = dryRun 
-                    ? `[DRY RUN] Found ${result.totalDuplicatesFound} duplicate pages that would be removed`
-                    : `Successfully removed ${result.duplicatesRemoved} duplicate pages`;
-                log('success', 'REPAIR', message);
-                
-                if (!dryRun && result.details.length > 0) {
-                    console.log('\nRemoved duplicates:');
-                    result.details.forEach(detail => {
-                        const status = detail.error ? chalk.red('FAILED') : chalk.green('SUCCESS');
-                        console.log(`  [${status}] TaskID ${detail.taskId}: ${detail.title} (${detail.pageId})`);
-                        if (detail.error) {
-                            console.log(`    Error: ${detail.error}`);
-                        }
-                    });
-                }
-            }
-        } else {
-            log('error', 'REPAIR', `Failed to repair duplicates: ${result.error}`);
-            process.exit(1);
-        }
-        
-    } catch (error) {
-        log('error', 'REPAIR', `Failed to repair Notion duplicates: ${error.message}`);
-        process.exit(1);
-    }
-}
 
 /**
  * Command to validate Notion synchronization
@@ -76,16 +26,16 @@ export async function validateNotionSyncCommand(options = {}) {
             process.exit(1);
         }
 
-        log('info', 'VALIDATE', 'Validating Notion synchronization...');
+        log('info', 'VALIDATE', '🔍 Checking Notion synchronization status...');
         
         const report = await validateNotionSync(projectRoot);
         
         if (report.success) {
-            console.log('\n' + chalk.bold('Notion Sync Validation Report'));
-            console.log('=' + '='.repeat(35));
-            console.log(`Local tasks: ${report.localTaskCount}`);
-            console.log(`Notion pages: ${report.notionPageCount}`);
-            console.log(`Notion task IDs: ${report.notionTaskIdCount}`);
+            console.log('\n' + chalk.bold('📊 Notion Sync Health Check'));
+            console.log('═' + '═'.repeat(35));
+            console.log(`📝 Local tasks: ${chalk.cyan(report.localTaskCount)}`);
+            console.log(`📄 Notion pages: ${chalk.cyan(report.notionPageCount)}`);
+            console.log(`🔗 Notion task IDs: ${chalk.cyan(report.notionTaskIdCount)}`);
             
             // Show issues if any
             const hasIssues = report.duplicatesInNotion.length > 0 || 
@@ -94,10 +44,10 @@ export async function validateNotionSyncCommand(options = {}) {
                              report.mappingIssues.length > 0;
             
             if (hasIssues) {
-                console.log('\n' + chalk.yellow('Issues Found:'));
+                console.log('\n' + chalk.yellow('🔧 Found some sync differences:'));
                 
                 if (report.duplicatesInNotion.length > 0) {
-                    console.log(`  ${chalk.red('●')} ${report.duplicatesInNotion.length} taskids with duplicates in Notion`);
+                    console.log(`  ${chalk.red('🔄')} ${report.duplicatesInNotion.length} tasks have duplicate pages in Notion`);
                     if (options.verbose) {
                         report.duplicatesInNotion.forEach(dup => {
                             console.log(`    - TaskID ${dup.taskId}: ${dup.pageCount} pages`);
@@ -106,7 +56,7 @@ export async function validateNotionSyncCommand(options = {}) {
                 }
                 
                 if (report.missingInNotion.length > 0) {
-                    console.log(`  ${chalk.yellow('●')} ${report.missingInNotion.length} tasks missing in Notion`);
+                    console.log(`  ${chalk.yellow('📤')} ${report.missingInNotion.length} tasks not yet synced to Notion`);
                     if (options.verbose) {
                         report.missingInNotion.slice(0, 10).forEach(taskId => {
                             console.log(`    - TaskID ${taskId}`);
@@ -118,7 +68,7 @@ export async function validateNotionSyncCommand(options = {}) {
                 }
                 
                 if (report.extraInNotion.length > 0) {
-                    console.log(`  ${chalk.blue('●')} ${report.extraInNotion.length} extra tasks in Notion`);
+                    console.log(`  ${chalk.blue('📥')} ${report.extraInNotion.length} extra pages found in Notion`);
                     if (options.verbose) {
                         report.extraInNotion.slice(0, 10).forEach(taskId => {
                             console.log(`    - TaskID ${taskId}`);
@@ -130,7 +80,7 @@ export async function validateNotionSyncCommand(options = {}) {
                 }
                 
                 if (report.mappingIssues.length > 0) {
-                    console.log(`  ${chalk.magenta('●')} ${report.mappingIssues.length} mapping consistency issues`);
+                    console.log(`  ${chalk.magenta('🔗')} ${report.mappingIssues.length} mapping differences detected`);
                     if (options.verbose) {
                         report.mappingIssues.forEach(issue => {
                             console.log(`    - [${issue.tag}] ${issue.taskId}: ${issue.issue}`);
@@ -138,10 +88,10 @@ export async function validateNotionSyncCommand(options = {}) {
                     }
                 }
                 
-                console.log(`\n${chalk.yellow('Recommendation:')} Run 'task-master repair-notion-duplicates' to fix duplicate issues.`);
+                console.log(`\n${chalk.green('💡 Quick fix:')} Run ${chalk.bold('task-master repair-notion')} to sync everything up!`);
                 
             } else {
-                console.log(`\n${chalk.green('✓')} No issues found - Notion sync is healthy!`);
+                console.log(`\n${chalk.green('✅ Perfect sync!')} Your local tasks and Notion are perfectly aligned! 🎉`);
             }
             
         } else {
@@ -155,33 +105,6 @@ export async function validateNotionSyncCommand(options = {}) {
     }
 }
 
-/**
- * Command to force full Notion synchronization
- * @param {Object} options - Command options
- */
-export async function forceNotionSyncCommand(options = {}) {
-    const { projectRoot: providedRoot } = options;
-    
-    try {
-        const taskMaster = await initTaskMaster(providedRoot);
-        const projectRoot = taskMaster.getProjectRoot();
-        
-        if (!projectRoot) {
-            log('error', 'SYNC', 'Project root not found. Please run this command from a TaskMaster project directory.');
-            process.exit(1);
-        }
-
-        log('info', 'SYNC', 'Starting forced full Notion synchronization...');
-        
-        await forceFullNotionSync(projectRoot);
-        
-        log('success', 'SYNC', 'Forced full synchronization completed successfully');
-        
-    } catch (error) {
-        log('error', 'SYNC', `Failed to force sync: ${error.message}`);
-        process.exit(1);
-    }
-}
 
 /**
  * Command to completely reset the Notion database by archiving all pages and recreating from local tasks
@@ -213,6 +136,66 @@ export async function resetNotionCommand(options = {}) {
         
     } catch (error) {
         log('error', 'RESET', `Failed to reset Notion database: ${error.message}`);
+        process.exit(1);
+    }
+}
+
+/**
+ * Command to repair Notion database comprehensively
+ * Combines duplicate removal and missing task synchronization
+ * @param {Object} options - Command options
+ */
+export async function repairNotionCommand(options = {}) {
+    const { dryRun = false, projectRoot: providedRoot } = options;
+    
+    try {
+        const taskMaster = await initTaskMaster(providedRoot);
+        const projectRoot = taskMaster.getProjectRoot();
+        
+        if (!projectRoot) {
+            log('error', 'REPAIR', 'Project root not found. Please run this command from a TaskMaster project directory.');
+            process.exit(1);
+        }
+
+        log('info', 'REPAIR', `${dryRun ? '[DRY RUN] ' : ''}Starting comprehensive Notion repair...`);
+        
+        const result = await repairNotion(projectRoot, { dryRun });
+        
+        if (result.success) {
+            log('success', 'REPAIR', result.summary);
+            
+            // Detailed reporting
+            if (result.duplicatesFound > 0) {
+                console.log(`\n${chalk.yellow('Duplicates:')} ${result.duplicatesFound} taskids had duplicates`);
+                if (!dryRun && result.duplicatesRemoved > 0) {
+                    console.log(`  → Removed ${result.duplicatesRemoved} duplicate pages`);
+                }
+            }
+            
+            if (result.tasksAdded > 0 || (dryRun && result.additionDetails.length > 0)) {
+                const count = dryRun ? result.additionDetails.length : result.tasksAdded;
+                console.log(`\n${chalk.blue('Missing Tasks:')} ${count} tasks ${dryRun ? 'would be' : 'were'} added to Notion`);
+            }
+            
+            if (result.pagesWithoutTaskId > 0) {
+                console.log(`\n${chalk.yellow('Warning:')} ${result.pagesWithoutTaskId} pages found without taskid property`);
+            }
+            
+            // Summary stats
+            console.log(`\n${chalk.green('Summary:')}`);
+            console.log(`  Local Tasks: ${result.localTaskCount}`);
+            console.log(`  Notion Pages: ${result.notionPageCount}`);
+            if (dryRun) {
+                console.log(`  ${chalk.cyan('[DRY RUN]')} No actual changes made`);
+            }
+            
+        } else {
+            log('error', 'REPAIR', `Repair failed: ${result.error}`);
+            process.exit(1);
+        }
+        
+    } catch (error) {
+        log('error', 'REPAIR', `Failed to repair Notion: ${error.message}`);
         process.exit(1);
     }
 }

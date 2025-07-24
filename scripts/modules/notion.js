@@ -307,10 +307,12 @@ function flattenTasksWithTag(tasks, tag) {
     for (const t of tasks) {
         let flattenedSubtaskIds = [];
         if (Array.isArray(t.subtasks)) {
-            // Collect all subtask ids for this parent
-            const subtaskIds = t.subtasks.map(st => st.id);
-            flattenedSubtaskIds = t.subtasks.map(st => `${t.id}.${st.id}`);
-            for (const st of t.subtasks) {
+            // Filter out subtasks with undefined IDs and collect valid subtask ids
+            const validSubtasks = t.subtasks.filter(st => st.id !== undefined && st.id !== null);
+            const subtaskIds = validSubtasks.map(st => st.id);
+            flattenedSubtaskIds = validSubtasks.map(st => `${t.id}.${st.id}`);
+            
+            for (const st of validSubtasks) {
                 const subId = `${t.id}.${st.id}`;
                 // Convert dependencies
                 let newDeps = st.dependencies;
@@ -343,9 +345,12 @@ function flattenTasksMap(tasks) {
     for (const t of tasks) {
         let flattenedSubtaskIds = [];
         if (Array.isArray(t.subtasks)) {
-            const subtaskIds = t.subtasks.map(st => st.id);
-            flattenedSubtaskIds = t.subtasks.map(st => `${t.id}.${st.id}`);
-            for (const st of t.subtasks) {
+            // Filter out subtasks with undefined IDs and collect valid subtask ids
+            const validSubtasks = t.subtasks.filter(st => st.id !== undefined && st.id !== null);
+            const subtaskIds = validSubtasks.map(st => st.id);
+            flattenedSubtaskIds = validSubtasks.map(st => `${t.id}.${st.id}`);
+            
+            for (const st of validSubtasks) {
                 const subId = `${t.id}.${st.id}`;
                 let newDeps = st.dependencies;
                 if (Array.isArray(st.dependencies)) {
@@ -747,7 +752,18 @@ async function updateNotionComplexityForCurrentTag(projectRoot) {
 async function deleteTaskFromNotion(task, tag, mapping, meta, mappingFile) {
     const notionId = getNotionPageId(mapping, tag, task.id);
     if (!notionId) return;
-    await executeWithRetry(() => notion.pages.update({ page_id: notionId, archived: true }));
+    
+    try {
+        await executeWithRetry(() => notion.pages.update({ page_id: notionId, archived: true }));
+    } catch (error) {
+        // Ignore errors for already archived blocks - they're already "deleted"
+        if (error.message && error.message.includes("Can't edit block that is archived")) {
+            logger.info(`Task [${tag}] ${task.id} was already archived, skipping deletion`);
+        } else {
+            throw error; // Re-throw other errors
+        }
+    }
+    
     const newMapping = removeNotionPageId(mapping, tag, task.id);
     saveNotionSyncMapping(newMapping, meta, mappingFile);
 }
@@ -1260,7 +1276,7 @@ async function validateNotionSync(projectRoot) {
         // 2. Flatten local tasks
         const localTasks = new Map();
         for (const { id, task } of flattenTasksWithTag(localData.tasks, tag)) {
-            localTasks.set(id, task);
+            localTasks.set(String(id), task);
         }
         
         // 3. Fetch Notion pages
@@ -1524,8 +1540,345 @@ async function resetNotionDatabase(projectRoot) {
     }
 }
 
+/**
+ * Comprehensive Notion repair function that intelligently fixes all synchronization issues.
+ * Combines duplicate removal and missing task synchronization in one command.
+ * @param {string} projectRoot - Project root directory
+ * @param {Object} options - Options { dryRun: boolean }
+ * @returns {Promise<Object>} Comprehensive repair report
+ */
+async function repairNotion(projectRoot, options = {}) {
+    const { dryRun = false } = options;
+    
+    await initNotion();
+    if (!isNotionEnabled || !notion) {
+        return { success: false, error: 'Notion sync disabled' };
+    }
+    
+    try {
+        logger.info(`${dryRun ? '[DRY RUN] ' : ''}Starting comprehensive Notion repair...`);
+        
+        // Phase 1: Complete diagnostic (like validate-notion-sync)
+        logger.info('Phase 1: Analyzing current synchronization state...');
+        
+        const taskMaster = currentTaskMaster;
+        const tag = taskMaster ? taskMaster.getCurrentTag() : getCurrentTag(projectRoot);
+        const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
+        const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+        
+        // Load local data
+        const localData = readJSON(taskmasterTasksFile, projectRoot, tag);
+        const { mapping } = loadNotionSyncMapping(mappingFile);
+        
+        if (!localData || !Array.isArray(localData.tasks)) {
+            return { success: false, error: 'No local task data found' };
+        }
+        
+        // Flatten local tasks
+        const localTasks = new Map();
+        for (const { id, task } of flattenTasksWithTag(localData.tasks, tag)) {
+            localTasks.set(String(id), task);
+        }
+        
+        // Fetch all Notion pages
+        const notionPages = await fetchAllNotionPages();
+        logger.info(`Found ${localTasks.size} local tasks and ${notionPages.length} Notion pages`);
+        
+        // Group Notion pages by taskid
+        const pagesByTaskId = new Map();
+        const pagesWithoutTaskId = [];
+        const notionTaskIds = new Set();
+        
+        for (const page of notionPages) {
+            const taskIdProperty = page.properties?.taskid?.rich_text?.[0]?.text?.content;
+            if (taskIdProperty) {
+                const taskId = taskIdProperty.trim();
+                notionTaskIds.add(taskId);
+                if (!pagesByTaskId.has(taskId)) {
+                    pagesByTaskId.set(taskId, []);
+                }
+                pagesByTaskId.get(taskId).push(page);
+            } else {
+                pagesWithoutTaskId.push(page);
+            }
+        }
+        
+        // Phase 2: Remove duplicates (like repair-notion-duplicates)
+        logger.info('Phase 2: Removing duplicate pages...');
+        
+        const duplicates = new Map();
+        let totalDuplicatePages = 0;
+        
+        for (const [taskId, pages] of pagesByTaskId.entries()) {
+            if (pages.length > 1) {
+                duplicates.set(taskId, pages);
+                totalDuplicatePages += pages.length - 1;
+            }
+        }
+        
+        const duplicateDetails = [];
+        let duplicatesRemoved = 0;
+        
+        if (duplicates.size > 0) {
+            logger.info(`Found ${duplicates.size} taskids with duplicates (${totalDuplicatePages} pages to remove)`);
+            
+            for (const [taskId, pages] of duplicates.entries()) {
+                // Sort by created_time (most recent first)
+                const sortedPages = pages.sort((a, b) => 
+                    new Date(b.created_time) - new Date(a.created_time)
+                );
+                
+                const pageToKeep = sortedPages[0];
+                const pagesToRemove = sortedPages.slice(1);
+                
+                logger.info(`TaskID ${taskId}: keeping page ${pageToKeep.id}, removing ${pagesToRemove.length} duplicates`);
+                
+                for (const pageToRemove of pagesToRemove) {
+                    const detail = {
+                        taskId,
+                        pageId: pageToRemove.id,
+                        title: pageToRemove.properties?.title?.title?.[0]?.text?.content || 'Untitled',
+                        createdTime: pageToRemove.created_time
+                    };
+                    
+                    if (!dryRun) {
+                        try {
+                            await executeWithRetry(() => notion.pages.update({
+                                page_id: pageToRemove.id,
+                                archived: true
+                            }));
+                            
+                            logger.info(`✓ Archived duplicate page ${pageToRemove.id} for taskID ${taskId}`);
+                            duplicatesRemoved++;
+                        } catch (e) {
+                            logger.error(`✗ Failed to archive page ${pageToRemove.id}:`, e.message);
+                            detail.error = e.message;
+                        }
+                    } else {
+                        logger.info(`[DRY RUN] Would archive page ${pageToRemove.id} for taskID ${taskId}`);
+                    }
+                    
+                    duplicateDetails.push(detail);
+                }
+            }
+        } else {
+            logger.info('No duplicates found');
+        }
+        
+        // Update pagesByTaskId after duplicate removal
+        if (!dryRun && duplicatesRemoved > 0) {
+            for (const [taskId, pages] of duplicates.entries()) {
+                const sortedPages = pages.sort((a, b) => 
+                    new Date(b.created_time) - new Date(a.created_time)
+                );
+                pagesByTaskId.set(taskId, [sortedPages[0]]); // Keep only the most recent
+            }
+        }
+        
+        // Phase 3: Add missing tasks (safe synchronization)
+        logger.info('Phase 3: Adding missing tasks...');
+        
+        const missingTasks = [];
+        for (const [taskId, task] of localTasks) {
+            // A task is missing only if it's not in notionTaskIds at all
+            // Tasks that had duplicates but were cleaned up are NOT missing since we kept one page
+            if (!notionTaskIds.has(taskId)) {
+                missingTasks.push({ id: taskId, task });
+            }
+        }
+        
+        let tasksAdded = 0;
+        const additionDetails = [];
+        
+        if (missingTasks.length > 0) {
+            logger.info(`Found ${missingTasks.length} missing tasks to add`);
+            
+            if (!dryRun) {
+                // Instead of using syncTasksWithNotion which compares states and recreates everything,
+                // directly add only the missing tasks one by one
+                const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+                let { mapping, meta } = loadNotionSyncMapping(mappingFile);
+                
+                for (const { id, task } of missingTasks) {
+                    try {
+                        logger.info(`Adding missing task ${id}: ${task.title}`);
+                        await addTaskToNotion(task, tag, mapping, meta, mappingFile);
+                        // Reload mapping after each add
+                        ({ mapping, meta } = loadNotionSyncMapping(mappingFile));
+                        tasksAdded++;
+                        
+                        const detail = {
+                            id,
+                            title: task.title,
+                            status: 'added'
+                        };
+                        additionDetails.push(detail);
+                        
+                        logger.info(`✓ Successfully added task ${id} to Notion`);
+                    } catch (e) {
+                        logger.error(`✗ Failed to add task ${id} to Notion:`, e.message);
+                        const detail = {
+                            id,
+                            title: task.title,
+                            status: 'error',
+                            error: e.message
+                        };
+                        additionDetails.push(detail);
+                    }
+                }
+            } else {
+                for (const { id, task } of missingTasks) {
+                    logger.info(`[DRY RUN] Would add task: ${id} - ${task.title}`);
+                    additionDetails.push({ id, title: task.title });
+                }
+            }
+        } else {
+            logger.info('No missing tasks found');
+        }
+        
+        // Phase 4: Remove extra tasks from Notion (TaskMaster is source of truth)
+        logger.info('Phase 4: Removing extra tasks from Notion...');
+        
+        const extraTasks = [];
+        for (const taskId of notionTaskIds) {
+            if (!localTasks.has(taskId)) {
+                extraTasks.push(taskId);
+            }
+        }
+        
+        let extraTasksRemoved = 0;
+        const { preserveExtraTasks = false } = options;
+        
+        if (extraTasks.length > 0) {
+            if (preserveExtraTasks) {
+                logger.warn(`Found ${extraTasks.length} extra tasks in Notion (preserved due to --preserve-extra-tasks option)`);
+                logger.info('Extra tasks: ' + extraTasks.slice(0, 10).join(', ') + (extraTasks.length > 10 ? '...' : ''));
+            } else {
+                logger.warn(`Found ${extraTasks.length} extra tasks in Notion (TaskMaster is source of truth)`);
+                
+                if (!dryRun) {
+                    // Find pages to remove
+                    const pagesToRemove = [];
+                    for (const taskId of extraTasks) {
+                        const pages = pagesByTaskId.get(taskId) || [];
+                        pagesToRemove.push(...pages);
+                    }
+                    
+                    if (pagesToRemove.length > 0) {
+                        logger.info(`Archiving ${pagesToRemove.length} extra pages from Notion...`);
+                        await archivePagesInParallel(pagesToRemove);
+                        extraTasksRemoved = pagesToRemove.length;
+                        
+                        // Update our tracking
+                        for (const taskId of extraTasks) {
+                            notionTaskIds.delete(taskId);
+                            pagesByTaskId.delete(taskId);
+                        }
+                    }
+                } else {
+                    logger.info(`[DRY RUN] Would remove ${extraTasks.length} extra tasks: ${extraTasks.slice(0, 10).join(', ')}${extraTasks.length > 10 ? '...' : ''}`);
+                }
+            }
+        } else {
+            logger.info('No extra tasks found in Notion');
+        }
+        
+        // Phase 5: Clean up duplicate mappings (if not dry run)
+        if (!dryRun && (duplicatesRemoved > 0 || tasksAdded > 0 || extraTasksRemoved > 0)) {
+            logger.info('Phase 5: Cleaning up duplicate mappings...');
+            await cleanupNotionMapping(projectRoot, duplicates);
+        }
+        
+        // Phase 6: Clean up invalid mappings that point to non-existent pages
+        logger.info('Phase 6: Cleaning up invalid mappings...');
+        let invalidMappingsRemoved = 0;
+        
+        if (!dryRun) {
+            const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+            let { mapping, meta } = loadNotionSyncMapping(mappingFile);
+            let mappingChanged = false;
+            
+            // Check each mapping entry
+            for (const tagKey in mapping) {
+                for (const idKey in mapping[tagKey]) {
+                    const notionId = mapping[tagKey][idKey];
+                    const notionPage = notionPages.find(p => p.id === notionId);
+                    
+                    if (!notionPage || notionPage.archived) {
+                        logger.info(`Removing invalid mapping: [${tagKey}] ${idKey} -> ${notionId}`);
+                        delete mapping[tagKey][idKey];
+                        invalidMappingsRemoved++;
+                        mappingChanged = true;
+                        
+                        // Clean up empty tag objects
+                        if (Object.keys(mapping[tagKey]).length === 0) {
+                            delete mapping[tagKey];
+                        }
+                    }
+                }
+            }
+            
+            // Save cleaned mapping if changes were made
+            if (mappingChanged) {
+                saveNotionSyncMapping(mapping, meta, mappingFile);
+                logger.info(`Cleaned up ${invalidMappingsRemoved} invalid mappings`);
+            } else {
+                logger.info('No invalid mappings found');
+            }
+        } else {
+            // Dry run: count invalid mappings without removing them
+            for (const tagKey in mapping) {
+                for (const idKey in mapping[tagKey]) {
+                    const notionId = mapping[tagKey][idKey];
+                    const notionPage = notionPages.find(p => p.id === notionId);
+                    
+                    if (!notionPage || notionPage.archived) {
+                        invalidMappingsRemoved++;
+                    }
+                }
+            }
+            
+            if (invalidMappingsRemoved > 0) {
+                logger.info(`[DRY RUN] Would remove ${invalidMappingsRemoved} invalid mappings`);
+            } else {
+                logger.info('[DRY RUN] No invalid mappings found');
+            }
+        }
+        
+        // Final report
+        const report = {
+            success: true,
+            dryRun,
+            localTaskCount: localTasks.size,
+            notionPageCount: notionPages.length,
+            duplicatesFound: duplicates.size,
+            duplicatesRemoved: dryRun ? 0 : duplicatesRemoved,
+            tasksAdded: dryRun ? 0 : tasksAdded,
+            extraTasksFound: extraTasks.length,
+            extraTasksRemoved: dryRun ? 0 : extraTasksRemoved,
+            invalidMappingsFound: invalidMappingsRemoved,
+            invalidMappingsRemoved: dryRun ? 0 : invalidMappingsRemoved,
+            pagesWithoutTaskId: pagesWithoutTaskId.length,
+            duplicateDetails,
+            additionDetails: dryRun ? additionDetails : [],
+            preserveExtraTasks,
+            summary: dryRun 
+                ? `[DRY RUN] Would remove ${totalDuplicatePages} duplicates, add ${missingTasks.length} missing tasks${extraTasks.length > 0 && !preserveExtraTasks ? `, remove ${extraTasks.length} extra tasks` : ''}${invalidMappingsRemoved > 0 ? `, and clean ${invalidMappingsRemoved} invalid mappings` : ''}`
+                : `Removed ${duplicatesRemoved} duplicates, added ${tasksAdded} missing tasks${extraTasksRemoved > 0 ? `, removed ${extraTasksRemoved} extra tasks` : ''}${invalidMappingsRemoved > 0 ? `, cleaned ${invalidMappingsRemoved} invalid mappings` : ''}`
+        };
+        
+        logger.success(report.summary);
+        
+        return report;
+        
+    } catch (e) {
+        logger.error('Failed to repair Notion:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
 export {
     setMcpLoggerForNotion, syncTasksWithNotion,
-    updateNotionComplexityForCurrentTag, repairNotionDuplicates, 
-    validateNotionSync, forceFullNotionSync, resetNotionDatabase
+    updateNotionComplexityForCurrentTag, 
+    validateNotionSync, resetNotionDatabase, repairNotion
 };

@@ -144,10 +144,9 @@ import {
 	categorizeRemovalResults
 } from '../../src/utils/profiles.js';
 import {
-	repairNotionDuplicatesCommand,
 	validateNotionSyncCommand,
-	forceNotionSyncCommand,
-	resetNotionCommand
+	resetNotionCommand,
+	repairNotionCommand
 } from './notion-commands.js';
 
 /**
@@ -4681,16 +4680,14 @@ Examples:
 			process.exit(1);
 		});
 
-	// repair-notion-duplicates command
+	// repair-notion command - comprehensive repair tool
 	programInstance
-		.command('repair-notion-duplicates')
-		.description('Repair Notion database by removing duplicate tasks based on taskid property')
-		.option('--dry-run', 'Show what would be removed without actually removing anything')
-		.option('--no-force-sync', 'Skip automatic full resynchronization after cleanup')
+		.command('repair-notion')
+		.description('Intelligently repair Notion database by removing duplicates and synchronizing missing tasks')
+		.option('--dry-run', 'Show what would be changed without actually making changes')
 		.action(async (options) => {
-			await repairNotionDuplicatesCommand({
-				dryRun: options.dryRun || false,
-				forceSync: options.forceSync !== false
+			await repairNotionCommand({
+				dryRun: options.dryRun || false
 			});
 		});
 
@@ -4703,14 +4700,6 @@ Examples:
 			await validateNotionSyncCommand({
 				verbose: options.verbose || false
 			});
-		});
-
-	// force-notion-sync command
-	programInstance
-		.command('force-notion-sync')
-		.description('Force a complete resynchronization with Notion by treating all local tasks as new')
-		.action(async (options) => {
-			await forceNotionSyncCommand(options);
 		});
 
 	// reset-notion command
