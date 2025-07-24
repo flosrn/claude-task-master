@@ -1203,12 +1203,24 @@ async function forceFullNotionSync(projectRoot) {
         // 5. Save the new mapping
         saveNotionSyncMapping(newMapping, meta, mappingFile);
         
-        // 6. Use empty previous state to force sync with the new mapping in place
-        // Now when syncTasksWithNotion runs, it will update existing pages instead of creating duplicates
-        const emptyPrevious = {};
+        // 6. Build previous state from mapped tasks to prevent them being treated as "added"
+        const intelligentPrevious = {};
+        intelligentPrevious._rawTaggedData = {};
+        intelligentPrevious._rawTaggedData[currentTag] = { tasks: [] };
         
+        // Add tasks that have mappings to previous state so they're treated as "existing"
+        if (currentData._rawTaggedData && currentData._rawTaggedData[currentTag]) {
+            for (const { id, task } of flattenTasksWithTag(currentData._rawTaggedData[currentTag].tasks || [], currentTag)) {
+                // If this task has a mapping, include it in previous state
+                if (newMapping[currentTag] && newMapping[currentTag][id]) {
+                    intelligentPrevious._rawTaggedData[currentTag].tasks.push(task);
+                }
+            }
+        }
+        
+        logger.info(`[NOTION] Built previous state with ${intelligentPrevious._rawTaggedData[currentTag].tasks.length} existing tasks`);
         logger.info('[NOTION] Starting synchronization with intelligent mapping...');
-        await syncTasksWithNotion(emptyPrevious, currentData._rawTaggedData, projectRoot);
+        await syncTasksWithNotion(intelligentPrevious._rawTaggedData, currentData._rawTaggedData, projectRoot);
         
         logger.info('[NOTION] Intelligent force synchronization completed');
         
