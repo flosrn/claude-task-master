@@ -1372,6 +1372,95 @@ async function validateNotionSync(projectRoot) {
 }
 
 /**
+ * Archives multiple Notion pages in parallel batches for optimal performance
+ * Uses intelligent batch sizing and rate limiting to respect Notion API constraints
+ * @param {Array} pages - Array of Notion page objects to archive
+ * @returns {Promise<{succeeded: number, failed: number, errors: Array}>}
+ */
+async function archivePagesInParallel(pages) {
+    const BATCH_SIZE = 8; // Optimal batch size for Notion API (respects rate limits)
+    const DELAY_BETWEEN_BATCHES = 200; // 200ms delay to prevent rate limiting
+    
+    let succeededCount = 0;
+    let failedCount = 0;
+    const errors = [];
+    
+    logger.info(`[NOTION] Starting parallel archival of ${pages.length} pages (batch size: ${BATCH_SIZE})`);
+    
+    // Process pages in batches
+    for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+        const batchStart = i;
+        const batchEnd = Math.min(i + BATCH_SIZE, pages.length);
+        const batch = pages.slice(batchStart, batchEnd);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(pages.length / BATCH_SIZE);
+        
+        logger.info(`[NOTION] Processing batch ${batchNumber}/${totalBatches} (pages ${batchStart + 1}-${batchEnd})`);
+        
+        try {
+            // Execute all requests in the current batch in parallel
+            const batchPromises = batch.map(async (page, index) => {
+                try {
+                    await executeWithRetry(() => notion.pages.update({
+                        page_id: page.id,
+                        archived: true
+                    }), 3); // 3 retries per page
+                    
+                    logger.debug(`[NOTION] ✓ Archived page ${page.id} (${batchStart + index + 1}/${pages.length})`);
+                    return { success: true, pageId: page.id };
+                } catch (error) {
+                    logger.error(`[NOTION] ✗ Failed to archive page ${page.id}:`, error.message);
+                    return { success: false, pageId: page.id, error: error.message };
+                }
+            });
+            
+            // Wait for all requests in the batch to complete
+            const batchResults = await Promise.all(batchPromises);
+            
+            // Count successes and failures for this batch
+            const batchSucceeded = batchResults.filter(r => r.success).length;
+            const batchFailed = batchResults.filter(r => !r.success).length;
+            
+            succeededCount += batchSucceeded;
+            failedCount += batchFailed;
+            
+            // Collect errors from this batch
+            batchResults
+                .filter(r => !r.success)
+                .forEach(r => errors.push({ pageId: r.pageId, error: r.error }));
+            
+            logger.info(`[NOTION] Batch ${batchNumber} completed: ${batchSucceeded} succeeded, ${batchFailed} failed`);
+            
+            // Add delay between batches to respect rate limits (except for the last batch)
+            if (batchEnd < pages.length) {
+                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+            }
+            
+        } catch (batchError) {
+            logger.error(`[NOTION] Batch ${batchNumber} failed completely:`, batchError.message);
+            failedCount += batch.length;
+            batch.forEach(page => {
+                errors.push({ pageId: page.id, error: batchError.message });
+            });
+        }
+    }
+    
+    // Final summary
+    const result = { succeeded: succeededCount, failed: failedCount, errors };
+    
+    if (failedCount === 0) {
+        logger.success(`[NOTION] ✅ Successfully archived all ${succeededCount} pages`);
+    } else {
+        logger.warn(`[NOTION] ⚠️ Archived ${succeededCount} pages, ${failedCount} failed`);
+        if (errors.length > 0) {
+            logger.warn(`[NOTION] First few errors:`, errors.slice(0, 3));
+        }
+    }
+    
+    return result;
+}
+
+/**
  * Completely resets the Notion database by archiving all existing pages and recreating from local tasks
  * @param {string} projectRoot 
  * @returns {Promise<Object>} Reset report
@@ -1390,21 +1479,10 @@ async function resetNotionDatabase(projectRoot) {
         const existingPages = await fetchAllNotionPages();
         logger.info(`[NOTION] Found ${existingPages.length} existing pages to archive`);
         
-        // 2. Archive all existing pages
+        // 2. Archive all existing pages in parallel batches
+        let archiveResults = { succeeded: 0, failed: 0, errors: [] };
         if (existingPages.length > 0) {
-            logger.info('[NOTION] Archiving all existing pages...');
-            for (const page of existingPages) {
-                try {
-                    await notion.pages.update({
-                        page_id: page.id,
-                        archived: true
-                    });
-                    logger.debug(`[NOTION] ✓ Archived page ${page.id}`);
-                } catch (error) {
-                    logger.error(`[NOTION] Failed to archive page ${page.id}:`, error.message);
-                }
-            }
-            logger.info(`[NOTION] Successfully archived ${existingPages.length} pages`);
+            archiveResults = await archivePagesInParallel(existingPages);
         }
         
         // 3. Clear local mapping file
@@ -1434,8 +1512,10 @@ async function resetNotionDatabase(projectRoot) {
         
         return { 
             success: true, 
-            archivedPages: existingPages.length,
-            message: `Successfully reset Notion database - archived ${existingPages.length} pages and recreated all local tasks`
+            archivedPages: archiveResults.succeeded,
+            failedArchives: archiveResults.failed,
+            archiveErrors: archiveResults.errors,
+            message: `Successfully reset Notion database - archived ${archiveResults.succeeded}/${existingPages.length} pages and recreated all local tasks`
         };
         
     } catch (e) {
