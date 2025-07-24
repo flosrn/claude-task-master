@@ -1142,22 +1142,87 @@ async function cleanupNotionMapping(projectRoot, duplicates) {
  * @param {string} projectRoot 
  */
 async function forceFullNotionSync(projectRoot) {
+    await initNotion();
+    if (!isNotionEnabled || !notion) {
+        throw new Error('Notion sync disabled');
+    }
+    
     try {
+        logger.info('[NOTION] Starting intelligent force synchronization...');
+        
         const taskMaster = currentTaskMaster;
         const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
+        const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
         
-        // Read current tasks
+        // 1. Read current local tasks
         const currentData = readJSON(taskmasterTasksFile, projectRoot);
         if (!currentData || !currentData._rawTaggedData) {
             logger.warn('No task data found for full sync');
             return;
         }
         
-        // Use empty previous state to force all tasks to be considered "added"
-        const emptyPrevious = {};
+        // 2. Fetch all existing Notion pages
+        logger.info('[NOTION] Fetching existing Notion pages...');
+        const notionPages = await fetchAllNotionPages();
+        logger.info(`[NOTION] Found ${notionPages.length} existing pages in Notion`);
         
-        logger.info('Starting forced full synchronization...');
-        await syncTasksWithNotion(emptyPrevious, currentData._rawTaggedData, projectRoot);
+        // 3. Build a mapping of taskid -> notion page ID for existing pages
+        const existingTaskIdToPageId = new Map();
+        for (const page of notionPages) {
+            const taskId = page.properties?.taskid?.rich_text?.[0]?.text?.content?.trim();
+            if (taskId) {
+                existingTaskIdToPageId.set(taskId, page.id);
+            }
+        }
+        logger.info(`[NOTION] Found ${existingTaskIdToPageId.size} pages with valid taskids`);
+        
+        // 4. Build a new mapping based on existing pages
+        const newMapping = {};
+        const meta = {};
+        const currentTag = taskMaster ? taskMaster.getCurrentTag() : getCurrentTag(projectRoot);
+        
+        // Initialize mapping structure
+        if (!newMapping[currentTag]) {
+            newMapping[currentTag] = {};
+        }
+        
+        // Map local tasks to existing Notion pages where possible
+        let mappedCount = 0;
+        if (currentData._rawTaggedData && currentData._rawTaggedData[currentTag]) {
+            for (const { id, task } of flattenTasksWithTag(currentData._rawTaggedData[currentTag].tasks || [], currentTag)) {
+                const existingPageId = existingTaskIdToPageId.get(String(id));
+                if (existingPageId) {
+                    newMapping[currentTag][id] = existingPageId;
+                    mappedCount++;
+                }
+            }
+        }
+        
+        logger.info(`[NOTION] Mapped ${mappedCount} local tasks to existing Notion pages`);
+        
+        // 5. Save the new mapping
+        saveNotionSyncMapping(newMapping, meta, mappingFile);
+        
+        // 6. Build previous state from mapped tasks to prevent them being treated as "added"
+        const intelligentPrevious = {};
+        intelligentPrevious._rawTaggedData = {};
+        intelligentPrevious._rawTaggedData[currentTag] = { tasks: [] };
+        
+        // Add tasks that have mappings to previous state so they're treated as "existing"
+        if (currentData._rawTaggedData && currentData._rawTaggedData[currentTag]) {
+            for (const { id, task } of flattenTasksWithTag(currentData._rawTaggedData[currentTag].tasks || [], currentTag)) {
+                // If this task has a mapping, include it in previous state
+                if (newMapping[currentTag] && newMapping[currentTag][id]) {
+                    intelligentPrevious._rawTaggedData[currentTag].tasks.push(task);
+                }
+            }
+        }
+        
+        logger.info(`[NOTION] Built previous state with ${intelligentPrevious._rawTaggedData[currentTag].tasks.length} existing tasks`);
+        logger.info('[NOTION] Starting synchronization with intelligent mapping...');
+        await syncTasksWithNotion(intelligentPrevious._rawTaggedData, currentData._rawTaggedData, projectRoot);
+        
+        logger.info('[NOTION] Intelligent force synchronization completed');
         
     } catch (e) {
         logger.error('Failed to force full sync:', e.message);
@@ -1306,8 +1371,161 @@ async function validateNotionSync(projectRoot) {
     }
 }
 
+/**
+ * Archives multiple Notion pages in parallel batches for optimal performance
+ * Uses intelligent batch sizing and rate limiting to respect Notion API constraints
+ * @param {Array} pages - Array of Notion page objects to archive
+ * @returns {Promise<{succeeded: number, failed: number, errors: Array}>}
+ */
+async function archivePagesInParallel(pages) {
+    const BATCH_SIZE = 8; // Optimal batch size for Notion API (respects rate limits)
+    const DELAY_BETWEEN_BATCHES = 200; // 200ms delay to prevent rate limiting
+    
+    let succeededCount = 0;
+    let failedCount = 0;
+    const errors = [];
+    
+    logger.info(`Starting parallel archival of ${pages.length} pages (batch size: ${BATCH_SIZE})`);
+    
+    // Process pages in batches
+    for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+        const batchStart = i;
+        const batchEnd = Math.min(i + BATCH_SIZE, pages.length);
+        const batch = pages.slice(batchStart, batchEnd);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(pages.length / BATCH_SIZE);
+        
+        logger.info(`Processing batch ${batchNumber}/${totalBatches} (pages ${batchStart + 1}-${batchEnd})`);
+        
+        try {
+            // Execute all requests in the current batch in parallel
+            const batchPromises = batch.map(async (page, index) => {
+                try {
+                    await executeWithRetry(() => notion.pages.update({
+                        page_id: page.id,
+                        archived: true
+                    }), 3); // 3 retries per page
+                    
+                    logger.debug(`✓ Archived page ${page.id} (${batchStart + index + 1}/${pages.length})`);
+                    return { success: true, pageId: page.id };
+                } catch (error) {
+                    logger.error(`✗ Failed to archive page ${page.id}:`, error.message);
+                    return { success: false, pageId: page.id, error: error.message };
+                }
+            });
+            
+            // Wait for all requests in the batch to complete
+            const batchResults = await Promise.all(batchPromises);
+            
+            // Count successes and failures for this batch
+            const batchSucceeded = batchResults.filter(r => r.success).length;
+            const batchFailed = batchResults.filter(r => !r.success).length;
+            
+            succeededCount += batchSucceeded;
+            failedCount += batchFailed;
+            
+            // Collect errors from this batch
+            batchResults
+                .filter(r => !r.success)
+                .forEach(r => errors.push({ pageId: r.pageId, error: r.error }));
+            
+            logger.info(`Batch ${batchNumber} completed: ${batchSucceeded} succeeded, ${batchFailed} failed`);
+            
+            // Add delay between batches to respect rate limits (except for the last batch)
+            if (batchEnd < pages.length) {
+                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+            }
+            
+        } catch (batchError) {
+            logger.error(`Batch ${batchNumber} failed completely:`, batchError.message);
+            failedCount += batch.length;
+            batch.forEach(page => {
+                errors.push({ pageId: page.id, error: batchError.message });
+            });
+        }
+    }
+    
+    // Final summary
+    const result = { succeeded: succeededCount, failed: failedCount, errors };
+    
+    if (failedCount === 0) {
+        logger.success(`✅ Successfully archived all ${succeededCount} pages`);
+    } else {
+        logger.warn(`⚠️ Archived ${succeededCount} pages, ${failedCount} failed`);
+        if (errors.length > 0) {
+            logger.warn(`First few errors:`, errors.slice(0, 3));
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * Completely resets the Notion database by archiving all existing pages and recreating from local tasks
+ * @param {string} projectRoot 
+ * @returns {Promise<Object>} Reset report
+ */
+async function resetNotionDatabase(projectRoot) {
+    await initNotion();
+    if (!isNotionEnabled || !notion) {
+        return { success: false, error: 'Notion sync disabled' };
+    }
+    
+    try {
+        logger.info('[NOTION] Starting complete Notion database reset...');
+        
+        // 1. Fetch all existing pages
+        logger.info('[NOTION] Fetching all existing pages...');
+        const existingPages = await fetchAllNotionPages();
+        logger.info(`[NOTION] Found ${existingPages.length} existing pages to archive`);
+        
+        // 2. Archive all existing pages in parallel batches
+        let archiveResults = { succeeded: 0, failed: 0, errors: [] };
+        if (existingPages.length > 0) {
+            archiveResults = await archivePagesInParallel(existingPages);
+        }
+        
+        // 3. Clear local mapping file
+        const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+        logger.info('[NOTION] Cleaning up local mapping file...');
+        saveNotionSyncMapping(mappingFile, {});
+        logger.info('[NOTION] Local mapping file cleared');
+        
+        // 4. Load local tasks
+        const taskMaster = currentTaskMaster;
+        const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
+        const currentData = readJSON(taskmasterTasksFile, projectRoot);
+        
+        if (!currentData || !currentData._rawTaggedData) {
+            logger.warn('No task data found for reset');
+            return { success: false, error: 'No local task data found' };
+        }
+        
+        // 5. Recreate all tasks in order
+        logger.info('[NOTION] Recreating all tasks in correct order...');
+        
+        // Use empty previous state to create all tasks as new, but with clean Notion database
+        const emptyPrevious = {};
+        await syncTasksWithNotion(emptyPrevious, currentData._rawTaggedData, projectRoot);
+        
+        logger.info('[NOTION] Database reset completed successfully');
+        
+        return { 
+            success: true, 
+            archivedPages: archiveResults.succeeded,
+            failedArchives: archiveResults.failed,
+            archiveErrors: archiveResults.errors,
+            message: `Successfully reset Notion database - archived ${archiveResults.succeeded}/${existingPages.length} pages and recreated all local tasks`
+        };
+        
+    } catch (e) {
+        logger.error('Failed to reset Notion database:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
 export {
     setMcpLoggerForNotion, syncTasksWithNotion,
     updateNotionComplexityForCurrentTag, repairNotionDuplicates, 
-    validateNotionSync, forceFullNotionSync
+    validateNotionSync, forceFullNotionSync, resetNotionDatabase
 };

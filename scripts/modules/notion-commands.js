@@ -5,7 +5,7 @@
 
 import path from 'path';
 import { log } from './utils.js';
-import { repairNotionDuplicates, validateNotionSync, forceFullNotionSync } from './notion.js';
+import { repairNotionDuplicates, validateNotionSync, forceFullNotionSync, resetNotionDatabase } from './notion.js';
 import { initTaskMaster } from '../../src/task-master.js';
 import chalk from 'chalk';
 
@@ -179,6 +179,40 @@ export async function forceNotionSyncCommand(options = {}) {
         
     } catch (error) {
         log('error', 'SYNC', `Failed to force sync: ${error.message}`);
+        process.exit(1);
+    }
+}
+
+/**
+ * Command to completely reset the Notion database by archiving all pages and recreating from local tasks
+ * @param {Object} options - Command options
+ */
+export async function resetNotionCommand(options = {}) {
+    const { projectRoot: providedRoot } = options;
+    
+    try {
+        const taskMaster = await initTaskMaster(providedRoot);
+        const projectRoot = taskMaster.getProjectRoot();
+        
+        if (!projectRoot) {
+            log('error', 'RESET', 'Project root not found. Please run this command from a TaskMaster project directory.');
+            process.exit(1);
+        }
+
+        log('info', 'RESET', 'Starting complete Notion database reset...');
+        log('warn', 'RESET', 'This will archive ALL existing pages in Notion and recreate them from local tasks.');
+        
+        const result = await resetNotionDatabase(projectRoot);
+        
+        if (result.success) {
+            log('success', 'RESET', result.message);
+        } else {
+            log('error', 'RESET', `Reset failed: ${result.error}`);
+            process.exit(1);
+        }
+        
+    } catch (error) {
+        log('error', 'RESET', `Failed to reset Notion database: ${error.message}`);
         process.exit(1);
     }
 }
