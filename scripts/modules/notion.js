@@ -1152,6 +1152,7 @@ async function forceFullNotionSync(projectRoot) {
         
         const taskMaster = currentTaskMaster;
         const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
+        const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
         
         // 1. Read current local tasks
         const currentData = readJSON(taskmasterTasksFile, projectRoot);
@@ -1160,55 +1161,54 @@ async function forceFullNotionSync(projectRoot) {
             return;
         }
         
-        // 2. Fetch current state from Notion to understand what's already there
-        logger.info('[NOTION] Fetching current Notion state...');
+        // 2. Fetch all existing Notion pages
+        logger.info('[NOTION] Fetching existing Notion pages...');
         const notionPages = await fetchAllNotionPages();
         logger.info(`[NOTION] Found ${notionPages.length} existing pages in Notion`);
         
-        // 3. Build previous state based on what's currently in Notion
-        const notionBasedPrevious = {};
-        const currentTag = taskMaster ? taskMaster.getCurrentTag() : getCurrentTag(projectRoot);
-        
-        // Create a structure that represents what's currently in Notion
-        if (!notionBasedPrevious._rawTaggedData) {
-            notionBasedPrevious._rawTaggedData = {};
-        }
-        if (!notionBasedPrevious._rawTaggedData[currentTag]) {
-            notionBasedPrevious._rawTaggedData[currentTag] = { tasks: [] };
-        }
-        
-        // Convert Notion pages back to task structure
-        const notionTaskMap = new Map();
+        // 3. Build a mapping of taskid -> notion page ID for existing pages
+        const existingTaskIdToPageId = new Map();
         for (const page of notionPages) {
             const taskId = page.properties?.taskid?.rich_text?.[0]?.text?.content?.trim();
             if (taskId) {
-                const task = {
-                    id: taskId,
-                    title: page.properties?.title?.title?.[0]?.text?.content || '',
-                    description: page.properties?.description?.rich_text?.[0]?.text?.content || '',
-                    details: page.properties?.details?.rich_text?.[0]?.text?.content || '',
-                    testStrategy: page.properties?.testStrategy?.rich_text?.[0]?.text?.content || '',
-                    priority: page.properties?.priority?.select?.name || 'medium',
-                    status: page.properties?.status?.status?.name || 'pending',
-                    dependencies: [],
-                    subtasks: []
-                };
-                notionTaskMap.set(taskId, task);
+                existingTaskIdToPageId.set(taskId, page.id);
+            }
+        }
+        logger.info(`[NOTION] Found ${existingTaskIdToPageId.size} pages with valid taskids`);
+        
+        // 4. Build a new mapping based on existing pages
+        const newMapping = {};
+        const meta = {};
+        const currentTag = taskMaster ? taskMaster.getCurrentTag() : getCurrentTag(projectRoot);
+        
+        // Initialize mapping structure
+        if (!newMapping[currentTag]) {
+            newMapping[currentTag] = {};
+        }
+        
+        // Map local tasks to existing Notion pages where possible
+        let mappedCount = 0;
+        if (currentData._rawTaggedData && currentData._rawTaggedData[currentTag]) {
+            for (const { id, task } of flattenTasksWithTag(currentData._rawTaggedData[currentTag].tasks || [], currentTag)) {
+                const existingPageId = existingTaskIdToPageId.get(String(id));
+                if (existingPageId) {
+                    newMapping[currentTag][id] = existingPageId;
+                    mappedCount++;
+                }
             }
         }
         
-        // Build the previous state structure based on Notion content
-        const notionTasksArray = Array.from(notionTaskMap.values());
-        notionBasedPrevious._rawTaggedData[currentTag].tasks = notionTasksArray;
+        logger.info(`[NOTION] Mapped ${mappedCount} local tasks to existing Notion pages`);
         
-        logger.info(`[NOTION] Built previous state from ${notionTasksArray.length} Notion tasks`);
-        logger.info('[NOTION] Starting intelligent synchronization...');
+        // 5. Save the new mapping
+        saveNotionSyncMapping(newMapping, meta, mappingFile);
         
-        // 4. Now sync with the Notion-based previous state - this will:
-        // - Add tasks that exist locally but not in Notion
-        // - Update tasks that have changed
-        // - Skip tasks that are already in sync
-        await syncTasksWithNotion(notionBasedPrevious, currentData._rawTaggedData, projectRoot);
+        // 6. Use empty previous state to force sync with the new mapping in place
+        // Now when syncTasksWithNotion runs, it will update existing pages instead of creating duplicates
+        const emptyPrevious = {};
+        
+        logger.info('[NOTION] Starting synchronization with intelligent mapping...');
+        await syncTasksWithNotion(emptyPrevious, currentData._rawTaggedData, projectRoot);
         
         logger.info('[NOTION] Intelligent force synchronization completed');
         
