@@ -1,10 +1,10 @@
+import { Client } from '@notionhq/client';
+import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
-import { Client } from '@notionhq/client';
 import { COMPLEXITY_REPORT_FILE, TASKMASTER_TASKS_FILE } from '../../src/constants/paths.js';
-import { getCurrentTag, readJSON, log } from './utils.js';
 import { currentTaskMaster } from '../../src/task-master.js';
+import { getCurrentTag, log, readJSON } from './utils.js';
 
 const LOG_TAG = '[NOTION]';
 let logger = {
@@ -927,8 +927,387 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
     logger.success('Notion sync complete');
 }
 
+/**
+ * Repairs Notion database by removing duplicate tasks based on taskid property.
+ * Keeps the most recently created page for each unique taskid.
+ * @param {string} projectRoot - Project root directory
+ * @param {Object} options - Options { dryRun: boolean, forceSync: boolean }
+ * @returns {Promise<Object>} Result with removed duplicates count and details
+ */
+async function repairNotionDuplicates(projectRoot, options = {}) {
+    const { dryRun = false, forceSync = true } = options;
+    const debug = process.env.TASKMASTER_DEBUG || false;
+    
+    await initNotion();
+    if (!isNotionEnabled || !notion) {
+        logger.error(`Notion sync is disabled. Cannot repair duplicates.`);
+        return { success: false, error: 'Notion sync disabled' };
+    }
+
+    logger.info(`${dryRun ? '[DRY RUN] ' : ''}Starting Notion duplicate repair...`);
+    
+    try {
+        // 1. Fetch all pages from Notion database
+        logger.info('Fetching all pages from Notion database...');
+        const allPages = await fetchAllNotionPages();
+        logger.info(`Found ${allPages.length} total pages in Notion database`);
+
+        // 2. Group pages by taskid to identify duplicates
+        const pagesByTaskId = new Map();
+        const pagesWithoutTaskId = [];
+        
+        for (const page of allPages) {
+            const taskIdProperty = page.properties?.taskid?.rich_text?.[0]?.text?.content;
+            if (taskIdProperty) {
+                const taskId = taskIdProperty.trim();
+                if (!pagesByTaskId.has(taskId)) {
+                    pagesByTaskId.set(taskId, []);
+                }
+                pagesByTaskId.get(taskId).push(page);
+            } else {
+                pagesWithoutTaskId.push(page);
+            }
+        }
+
+        // 3. Identify duplicates (taskids with more than one page)
+        const duplicates = new Map();
+        let totalDuplicatePages = 0;
+        
+        for (const [taskId, pages] of pagesByTaskId.entries()) {
+            if (pages.length > 1) {
+                duplicates.set(taskId, pages);
+                totalDuplicatePages += pages.length - 1; // -1 because we keep one
+            }
+        }
+
+        logger.info(`Found ${duplicates.size} taskids with duplicates (${totalDuplicatePages} pages to remove)`);
+        if (pagesWithoutTaskId.length > 0) {
+            logger.warn(`Found ${pagesWithoutTaskId.length} pages without taskid property`);
+        }
+
+        if (duplicates.size === 0) {
+            logger.success('No duplicates found in Notion database');
+            return { success: true, duplicatesRemoved: 0, details: [] };
+        }
+
+        // 4. Remove duplicates (keep the most recently created page)
+        const removalDetails = [];
+        let removedCount = 0;
+
+        for (const [taskId, pages] of duplicates.entries()) {
+            // Sort by created_time (most recent first)
+            const sortedPages = pages.sort((a, b) => 
+                new Date(b.created_time) - new Date(a.created_time)
+            );
+            
+            const pageToKeep = sortedPages[0];
+            const pagesToRemove = sortedPages.slice(1);
+            
+            logger.info(`TaskID ${taskId}: keeping page ${pageToKeep.id} (${pageToKeep.created_time}), removing ${pagesToRemove.length} duplicates`);
+            
+            for (const pageToRemove of pagesToRemove) {
+                const detail = {
+                    taskId,
+                    pageId: pageToRemove.id,
+                    title: pageToRemove.properties?.title?.title?.[0]?.text?.content || 'Untitled',
+                    createdTime: pageToRemove.created_time
+                };
+                
+                if (!dryRun) {
+                    try {
+                        await executeWithRetry(() => notion.pages.update({
+                            page_id: pageToRemove.id,
+                            archived: true
+                        }));
+                        
+                        logger.info(`✓ Archived duplicate page ${pageToRemove.id} for taskID ${taskId}`);
+                        removedCount++;
+                    } catch (e) {
+                        logger.error(`✗ Failed to archive page ${pageToRemove.id} for taskID ${taskId}:`, e.message);
+                        detail.error = e.message;
+                    }
+                } else {
+                    logger.info(`[DRY RUN] Would archive page ${pageToRemove.id} for taskID ${taskId}`);
+                }
+                
+                removalDetails.push(detail);
+            }
+        }
+
+        // 5. Clean up local mapping file
+        if (!dryRun && removedCount > 0) {
+            logger.info('Cleaning up local mapping file...');
+            await cleanupNotionMapping(projectRoot, duplicates);
+        }
+
+        // 6. Force full resync if requested
+        if (!dryRun && forceSync && removedCount > 0) {
+            logger.info('Forcing full resynchronization...');
+            await forceFullNotionSync(projectRoot);
+        }
+
+        const resultMessage = dryRun 
+            ? `[DRY RUN] Would remove ${totalDuplicatePages} duplicate pages`
+            : `Successfully removed ${removedCount} duplicate pages`;
+        
+        logger.success(resultMessage);
+        
+        return {
+            success: true,
+            duplicatesRemoved: dryRun ? 0 : removedCount,
+            totalDuplicatesFound: totalDuplicatePages,
+            details: removalDetails,
+            dryRun
+        };
+
+    } catch (e) {
+        logger.error('Failed to repair Notion duplicates:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * Fetches all pages from the Notion database with pagination support
+ * @returns {Promise<Array>} Array of all pages
+ */
+async function fetchAllNotionPages() {
+    const allPages = [];
+    let cursor = undefined;
+    
+    do {
+        const response = await executeWithRetry(() => notion.databases.query({
+            database_id: NOTION_DATABASE_ID,
+            start_cursor: cursor,
+            page_size: 100 // Maximum allowed by Notion API
+        }));
+        
+        allPages.push(...response.results);
+        cursor = response.next_cursor;
+        
+        if (cursor) {
+            logger.debug(`Fetched ${allPages.length} pages so far, continuing...`);
+        }
+    } while (cursor);
+    
+    return allPages;
+}
+
+/**
+ * Cleans up the local notion-sync.json mapping file by removing entries
+ * for pages that were deleted during duplicate repair
+ * @param {string} projectRoot 
+ * @param {Map} duplicates - Map of taskId -> pages array
+ */
+async function cleanupNotionMapping(projectRoot, duplicates) {
+    const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+    let { mapping, meta } = loadNotionSyncMapping(mappingFile);
+    let cleaned = false;
+    
+    for (const [taskId, pages] of duplicates.entries()) {
+        // Keep only the first page (most recent), remove mappings for others
+        const sortedPages = pages.sort((a, b) => 
+            new Date(b.created_time) - new Date(a.created_time)
+        );
+        const pageToKeep = sortedPages[0];
+        const pagesToRemove = sortedPages.slice(1);
+        
+        // Remove mappings for duplicate pages
+        for (const tag in mapping) {
+            for (const id in mapping[tag]) {
+                const notionId = mapping[tag][id];
+                if (pagesToRemove.some(p => p.id === notionId)) {
+                    delete mapping[tag][id];
+                    cleaned = true;
+                    logger.debug(`Removed mapping [${tag}] ${id} -> ${notionId}`);
+                }
+            }
+            
+            // Clean up empty tag mappings
+            if (Object.keys(mapping[tag]).length === 0) {
+                delete mapping[tag];
+            }
+        }
+    }
+    
+    if (cleaned) {
+        saveNotionSyncMapping(mapping, meta, mappingFile);
+        logger.info('Local mapping file cleaned up');
+    } else {
+        logger.info('No mapping cleanup needed');
+    }
+}
+
+/**
+ * Forces a complete resynchronization with Notion by comparing current tasks with Notion state
+ * @param {string} projectRoot 
+ */
+async function forceFullNotionSync(projectRoot) {
+    try {
+        const taskMaster = currentTaskMaster;
+        const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
+        
+        // Read current tasks
+        const currentData = readJSON(taskmasterTasksFile, projectRoot);
+        if (!currentData || !currentData._rawTaggedData) {
+            logger.warn('No task data found for full sync');
+            return;
+        }
+        
+        // Use empty previous state to force all tasks to be considered "added"
+        const emptyPrevious = {};
+        
+        logger.info('Starting forced full synchronization...');
+        await syncTasksWithNotion(emptyPrevious, currentData._rawTaggedData, projectRoot);
+        
+    } catch (e) {
+        logger.error('Failed to force full sync:', e.message);
+        throw e;
+    }
+}
+
+/**
+ * Validates the integrity of Notion synchronization by comparing local tasks with Notion pages
+ * @param {string} projectRoot 
+ * @returns {Promise<Object>} Validation report
+ */
+async function validateNotionSync(projectRoot) {
+    await initNotion();
+    if (!isNotionEnabled || !notion) {
+        return { success: false, error: 'Notion sync disabled' };
+    }
+    
+    try {
+        logger.info('Validating Notion synchronization...');
+        
+        // 1. Load local data
+        const taskMaster = currentTaskMaster;
+        const tag = taskMaster ? taskMaster.getCurrentTag() : getCurrentTag(projectRoot);
+        const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
+        const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+        
+        const localData = readJSON(taskmasterTasksFile, projectRoot, tag);
+        const { mapping } = loadNotionSyncMapping(mappingFile);
+        
+        if (!localData || !Array.isArray(localData.tasks)) {
+            return { success: false, error: 'No local task data found' };
+        }
+        
+        // 2. Flatten local tasks
+        const localTasks = new Map();
+        for (const { id, task } of flattenTasksWithTag(localData.tasks, tag)) {
+            localTasks.set(id, task);
+        }
+        
+        // 3. Fetch Notion pages
+        const notionPages = await fetchAllNotionPages();
+        const notionTaskIds = new Set();
+        const notionPagesByTaskId = new Map();
+        
+        for (const page of notionPages) {
+            const taskId = page.properties?.taskid?.rich_text?.[0]?.text?.content?.trim();
+            if (taskId) {
+                notionTaskIds.add(taskId);
+                if (!notionPagesByTaskId.has(taskId)) {
+                    notionPagesByTaskId.set(taskId, []);
+                }
+                notionPagesByTaskId.get(taskId).push(page);
+            }
+        }
+        
+        // 4. Find inconsistencies
+        const report = {
+            success: true,
+            localTaskCount: localTasks.size,
+            notionPageCount: notionPages.length,
+            notionTaskIdCount: notionTaskIds.size,
+            duplicatesInNotion: [],
+            missingInNotion: [],
+            extraInNotion: [],
+            mappingIssues: []
+        };
+        
+        // Find duplicates in Notion
+        for (const [taskId, pages] of notionPagesByTaskId.entries()) {
+            if (pages.length > 1) {
+                report.duplicatesInNotion.push({
+                    taskId,
+                    pageCount: pages.length,
+                    pageIds: pages.map(p => p.id)
+                });
+            }
+        }
+        
+        // Find tasks missing in Notion
+        for (const [taskId] of localTasks) {
+            if (!notionTaskIds.has(String(taskId))) {
+                report.missingInNotion.push(taskId);
+            }
+        }
+        
+        // Find extra tasks in Notion
+        for (const taskId of notionTaskIds) {
+            if (!localTasks.has(taskId)) {
+                report.extraInNotion.push(taskId);
+            }
+        }
+        
+        // Check mapping consistency
+        for (const tagKey in mapping) {
+            for (const idKey in mapping[tagKey]) {
+                const notionId = mapping[tagKey][idKey];
+                const notionPage = notionPages.find(p => p.id === notionId);
+                if (!notionPage) {
+                    report.mappingIssues.push({
+                        tag: tagKey,
+                        taskId: idKey,
+                        notionId,
+                        issue: 'Mapping points to non-existent Notion page'
+                    });
+                } else if (notionPage.archived) {
+                    report.mappingIssues.push({
+                        tag: tagKey,
+                        taskId: idKey,
+                        notionId,
+                        issue: 'Mapping points to archived Notion page'
+                    });
+                }
+            }
+        }
+        
+        // Summary
+        const hasIssues = report.duplicatesInNotion.length > 0 || 
+                         report.missingInNotion.length > 0 || 
+                         report.extraInNotion.length > 0 || 
+                         report.mappingIssues.length > 0;
+        
+        if (hasIssues) {
+            logger.warn('Notion sync validation found issues:');
+            if (report.duplicatesInNotion.length > 0) {
+                logger.warn(`- ${report.duplicatesInNotion.length} taskids with duplicates in Notion`);
+            }
+            if (report.missingInNotion.length > 0) {
+                logger.warn(`- ${report.missingInNotion.length} tasks missing in Notion`);
+            }
+            if (report.extraInNotion.length > 0) {
+                logger.warn(`- ${report.extraInNotion.length} extra tasks in Notion`);
+            }
+            if (report.mappingIssues.length > 0) {
+                logger.warn(`- ${report.mappingIssues.length} mapping consistency issues`);
+            }
+        } else {
+            logger.success('Notion sync validation passed - no issues found');
+        }
+        
+        return report;
+        
+    } catch (e) {
+        logger.error('Failed to validate Notion sync:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
 export {
-    syncTasksWithNotion,
-    updateNotionComplexityForCurrentTag,
-    setMcpLoggerForNotion
+    setMcpLoggerForNotion, syncTasksWithNotion,
+    updateNotionComplexityForCurrentTag, repairNotionDuplicates, 
+    validateNotionSync, forceFullNotionSync
 };
