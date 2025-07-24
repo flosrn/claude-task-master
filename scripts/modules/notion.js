@@ -1385,7 +1385,7 @@ async function archivePagesInParallel(pages) {
     let failedCount = 0;
     const errors = [];
     
-    logger.info(`[NOTION] Starting parallel archival of ${pages.length} pages (batch size: ${BATCH_SIZE})`);
+    logger.info(`Starting parallel archival of ${pages.length} pages (batch size: ${BATCH_SIZE})`);
     
     // Process pages in batches
     for (let i = 0; i < pages.length; i += BATCH_SIZE) {
@@ -1395,7 +1395,7 @@ async function archivePagesInParallel(pages) {
         const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(pages.length / BATCH_SIZE);
         
-        logger.info(`[NOTION] Processing batch ${batchNumber}/${totalBatches} (pages ${batchStart + 1}-${batchEnd})`);
+        logger.info(`Processing batch ${batchNumber}/${totalBatches} (pages ${batchStart + 1}-${batchEnd})`);
         
         try {
             // Execute all requests in the current batch in parallel
@@ -1406,10 +1406,10 @@ async function archivePagesInParallel(pages) {
                         archived: true
                     }), 3); // 3 retries per page
                     
-                    logger.debug(`[NOTION] ✓ Archived page ${page.id} (${batchStart + index + 1}/${pages.length})`);
+                    logger.debug(`✓ Archived page ${page.id} (${batchStart + index + 1}/${pages.length})`);
                     return { success: true, pageId: page.id };
                 } catch (error) {
-                    logger.error(`[NOTION] ✗ Failed to archive page ${page.id}:`, error.message);
+                    logger.error(`✗ Failed to archive page ${page.id}:`, error.message);
                     return { success: false, pageId: page.id, error: error.message };
                 }
             });
@@ -1429,7 +1429,7 @@ async function archivePagesInParallel(pages) {
                 .filter(r => !r.success)
                 .forEach(r => errors.push({ pageId: r.pageId, error: r.error }));
             
-            logger.info(`[NOTION] Batch ${batchNumber} completed: ${batchSucceeded} succeeded, ${batchFailed} failed`);
+            logger.info(`Batch ${batchNumber} completed: ${batchSucceeded} succeeded, ${batchFailed} failed`);
             
             // Add delay between batches to respect rate limits (except for the last batch)
             if (batchEnd < pages.length) {
@@ -1437,7 +1437,7 @@ async function archivePagesInParallel(pages) {
             }
             
         } catch (batchError) {
-            logger.error(`[NOTION] Batch ${batchNumber} failed completely:`, batchError.message);
+            logger.error(`Batch ${batchNumber} failed completely:`, batchError.message);
             failedCount += batch.length;
             batch.forEach(page => {
                 errors.push({ pageId: page.id, error: batchError.message });
@@ -1449,11 +1449,11 @@ async function archivePagesInParallel(pages) {
     const result = { succeeded: succeededCount, failed: failedCount, errors };
     
     if (failedCount === 0) {
-        logger.success(`[NOTION] ✅ Successfully archived all ${succeededCount} pages`);
+        logger.success(`✅ Successfully archived all ${succeededCount} pages`);
     } else {
-        logger.warn(`[NOTION] ⚠️ Archived ${succeededCount} pages, ${failedCount} failed`);
+        logger.warn(`⚠️ Archived ${succeededCount} pages, ${failedCount} failed`);
         if (errors.length > 0) {
-            logger.warn(`[NOTION] First few errors:`, errors.slice(0, 3));
+            logger.warn(`First few errors:`, errors.slice(0, 3));
         }
     }
     
