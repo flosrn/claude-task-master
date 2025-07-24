@@ -143,6 +143,11 @@ import {
 	generateProfileRemovalSummary,
 	categorizeRemovalResults
 } from '../../src/utils/profiles.js';
+import {
+	repairNotionDuplicatesCommand,
+	validateNotionSyncCommand,
+	forceNotionSyncCommand
+} from './notion-commands.js';
 
 /**
  * Runs the interactive setup process for model configuration.
@@ -4673,6 +4678,38 @@ Examples:
 		.on('error', function (err) {
 			console.error(chalk.red(`Error: ${err.message}`));
 			process.exit(1);
+		});
+
+	// repair-notion-duplicates command
+	programInstance
+		.command('repair-notion-duplicates')
+		.description('Repair Notion database by removing duplicate tasks based on taskid property')
+		.option('--dry-run', 'Show what would be removed without actually removing anything')
+		.option('--no-force-sync', 'Skip automatic full resynchronization after cleanup')
+		.action(async (options) => {
+			await repairNotionDuplicatesCommand({
+				dryRun: options.dryRun || false,
+				forceSync: options.forceSync !== false
+			});
+		});
+
+	// validate-notion-sync command
+	programInstance
+		.command('validate-notion-sync')
+		.description('Validate the integrity of Notion synchronization by comparing local tasks with Notion pages')
+		.option('-v, --verbose', 'Show detailed information about issues found')
+		.action(async (options) => {
+			await validateNotionSyncCommand({
+				verbose: options.verbose || false
+			});
+		});
+
+	// force-notion-sync command
+	programInstance
+		.command('force-notion-sync')
+		.description('Force a complete resynchronization with Notion by treating all local tasks as new')
+		.action(async (options) => {
+			await forceNotionSyncCommand(options);
 		});
 
 	return programInstance;
