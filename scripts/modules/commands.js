@@ -146,7 +146,8 @@ import {
 import {
 	repairNotionDuplicatesCommand,
 	validateNotionSyncCommand,
-	forceNotionSyncCommand
+	forceNotionSyncCommand,
+	resetNotionCommand
 } from './notion-commands.js';
 
 /**
@@ -4710,6 +4711,14 @@ Examples:
 		.description('Force a complete resynchronization with Notion by treating all local tasks as new')
 		.action(async (options) => {
 			await forceNotionSyncCommand(options);
+		});
+
+	// reset-notion command
+	programInstance
+		.command('reset-notion')
+		.description('Completely reset the Notion database by archiving all pages and recreating from local tasks')
+		.action(async (options) => {
+			await resetNotionCommand(options);
 		});
 
 	return programInstance;

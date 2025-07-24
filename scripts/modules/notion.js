@@ -1142,22 +1142,75 @@ async function cleanupNotionMapping(projectRoot, duplicates) {
  * @param {string} projectRoot 
  */
 async function forceFullNotionSync(projectRoot) {
+    await initNotion();
+    if (!isNotionEnabled || !notion) {
+        throw new Error('Notion sync disabled');
+    }
+    
     try {
+        logger.info('[NOTION] Starting intelligent force synchronization...');
+        
         const taskMaster = currentTaskMaster;
         const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
         
-        // Read current tasks
+        // 1. Read current local tasks
         const currentData = readJSON(taskmasterTasksFile, projectRoot);
         if (!currentData || !currentData._rawTaggedData) {
             logger.warn('No task data found for full sync');
             return;
         }
         
-        // Use empty previous state to force all tasks to be considered "added"
-        const emptyPrevious = {};
+        // 2. Fetch current state from Notion to understand what's already there
+        logger.info('[NOTION] Fetching current Notion state...');
+        const notionPages = await fetchAllNotionPages();
+        logger.info(`[NOTION] Found ${notionPages.length} existing pages in Notion`);
         
-        logger.info('Starting forced full synchronization...');
-        await syncTasksWithNotion(emptyPrevious, currentData._rawTaggedData, projectRoot);
+        // 3. Build previous state based on what's currently in Notion
+        const notionBasedPrevious = {};
+        const currentTag = taskMaster ? taskMaster.getCurrentTag() : getCurrentTag(projectRoot);
+        
+        // Create a structure that represents what's currently in Notion
+        if (!notionBasedPrevious._rawTaggedData) {
+            notionBasedPrevious._rawTaggedData = {};
+        }
+        if (!notionBasedPrevious._rawTaggedData[currentTag]) {
+            notionBasedPrevious._rawTaggedData[currentTag] = { tasks: [] };
+        }
+        
+        // Convert Notion pages back to task structure
+        const notionTaskMap = new Map();
+        for (const page of notionPages) {
+            const taskId = page.properties?.taskid?.rich_text?.[0]?.text?.content?.trim();
+            if (taskId) {
+                const task = {
+                    id: taskId,
+                    title: page.properties?.title?.title?.[0]?.text?.content || '',
+                    description: page.properties?.description?.rich_text?.[0]?.text?.content || '',
+                    details: page.properties?.details?.rich_text?.[0]?.text?.content || '',
+                    testStrategy: page.properties?.testStrategy?.rich_text?.[0]?.text?.content || '',
+                    priority: page.properties?.priority?.select?.name || 'medium',
+                    status: page.properties?.status?.status?.name || 'pending',
+                    dependencies: [],
+                    subtasks: []
+                };
+                notionTaskMap.set(taskId, task);
+            }
+        }
+        
+        // Build the previous state structure based on Notion content
+        const notionTasksArray = Array.from(notionTaskMap.values());
+        notionBasedPrevious._rawTaggedData[currentTag].tasks = notionTasksArray;
+        
+        logger.info(`[NOTION] Built previous state from ${notionTasksArray.length} Notion tasks`);
+        logger.info('[NOTION] Starting intelligent synchronization...');
+        
+        // 4. Now sync with the Notion-based previous state - this will:
+        // - Add tasks that exist locally but not in Notion
+        // - Update tasks that have changed
+        // - Skip tasks that are already in sync
+        await syncTasksWithNotion(notionBasedPrevious, currentData._rawTaggedData, projectRoot);
+        
+        logger.info('[NOTION] Intelligent force synchronization completed');
         
     } catch (e) {
         logger.error('Failed to force full sync:', e.message);
@@ -1306,8 +1359,81 @@ async function validateNotionSync(projectRoot) {
     }
 }
 
+/**
+ * Completely resets the Notion database by archiving all existing pages and recreating from local tasks
+ * @param {string} projectRoot 
+ * @returns {Promise<Object>} Reset report
+ */
+async function resetNotionDatabase(projectRoot) {
+    await initNotion();
+    if (!isNotionEnabled || !notion) {
+        return { success: false, error: 'Notion sync disabled' };
+    }
+    
+    try {
+        logger.info('[NOTION] Starting complete Notion database reset...');
+        
+        // 1. Fetch all existing pages
+        logger.info('[NOTION] Fetching all existing pages...');
+        const existingPages = await fetchAllNotionPages();
+        logger.info(`[NOTION] Found ${existingPages.length} existing pages to archive`);
+        
+        // 2. Archive all existing pages
+        if (existingPages.length > 0) {
+            logger.info('[NOTION] Archiving all existing pages...');
+            for (const page of existingPages) {
+                try {
+                    await notion.pages.update({
+                        page_id: page.id,
+                        archived: true
+                    });
+                    logger.debug(`[NOTION] ✓ Archived page ${page.id}`);
+                } catch (error) {
+                    logger.error(`[NOTION] Failed to archive page ${page.id}:`, error.message);
+                }
+            }
+            logger.info(`[NOTION] Successfully archived ${existingPages.length} pages`);
+        }
+        
+        // 3. Clear local mapping file
+        const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+        logger.info('[NOTION] Cleaning up local mapping file...');
+        saveNotionSyncMapping(mappingFile, {});
+        logger.info('[NOTION] Local mapping file cleared');
+        
+        // 4. Load local tasks
+        const taskMaster = currentTaskMaster;
+        const taskmasterTasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, TASKMASTER_TASKS_FILE);
+        const currentData = readJSON(taskmasterTasksFile, projectRoot);
+        
+        if (!currentData || !currentData._rawTaggedData) {
+            logger.warn('No task data found for reset');
+            return { success: false, error: 'No local task data found' };
+        }
+        
+        // 5. Recreate all tasks in order
+        logger.info('[NOTION] Recreating all tasks in correct order...');
+        
+        // Use empty previous state to create all tasks as new, but with clean Notion database
+        const emptyPrevious = {};
+        await syncTasksWithNotion(emptyPrevious, currentData._rawTaggedData, projectRoot);
+        
+        logger.info('[NOTION] Database reset completed successfully');
+        
+        return { 
+            success: true, 
+            archivedPages: existingPages.length,
+            message: `Successfully reset Notion database - archived ${existingPages.length} pages and recreated all local tasks`
+        };
+        
+    } catch (e) {
+        logger.error('Failed to reset Notion database:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
 export {
     setMcpLoggerForNotion, syncTasksWithNotion,
     updateNotionComplexityForCurrentTag, repairNotionDuplicates, 
-    validateNotionSync, forceFullNotionSync
+    validateNotionSync, forceFullNotionSync, resetNotionDatabase
 };
