@@ -1,10 +1,10 @@
+import { Client } from '@notionhq/client';
+import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
-import { Client } from '@notionhq/client';
 import { COMPLEXITY_REPORT_FILE, TASKMASTER_TASKS_FILE } from '../../src/constants/paths.js';
-import { getCurrentTag, readJSON, log } from './utils.js';
 import { currentTaskMaster } from '../../src/task-master.js';
+import { getCurrentTag, log, readJSON } from './utils.js';
 
 const LOG_TAG = '[NOTION]';
 let logger = {
@@ -928,7 +928,6 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 }
 
 export {
-    syncTasksWithNotion,
-    updateNotionComplexityForCurrentTag,
-    setMcpLoggerForNotion
+    setMcpLoggerForNotion, syncTasksWithNotion,
+    updateNotionComplexityForCurrentTag
 };
