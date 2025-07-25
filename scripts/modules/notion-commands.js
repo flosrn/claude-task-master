@@ -5,16 +5,31 @@
 
 import path from 'path';
 import { log } from './utils.js';
-import { validateNotionSync, resetNotionDB, repairNotionDB } from './notion.js';
+import {
+	validateNotionSync,
+	resetNotionDB,
+	repairNotionDB,
+	setHierarchicalSyncMode
+} from './notion.js';
 import { initTaskMaster } from '../../src/task-master.js';
 import chalk from 'chalk';
+import {
+	validateNotionHierarchySetup,
+	validateNotionHierarchyIntegrity,
+	repairNotionHierarchy
+} from './notion-commands-hierarchy.js';
 
 /**
- * Command to validate Notion synchronization
- * @param {Object} options - Command options
+ * Command to validate Notion synchronization with hierarchy option support
+ * @param {Object} options - Command options including preserveFlattenTasks
  */
 export async function validateNotionSyncCommand(options = {}) {
-	const { projectRoot: providedRoot } = options;
+	const { projectRoot: providedRoot, preserveFlattenTasks = false } = options;
+
+	// Configure hierarchy behavior
+	if (preserveFlattenTasks) {
+		setHierarchicalSyncMode(false);
+	}
 
 	try {
 		const taskMaster = await initTaskMaster(providedRoot);
@@ -29,13 +44,27 @@ export async function validateNotionSyncCommand(options = {}) {
 			process.exit(1);
 		}
 
-		log('info', 'VALIDATE', '🔍 Checking Notion synchronization status...');
+		log(
+			'info',
+			'VALIDATE',
+			'🔍 Validating Notion synchronization with hierarchy detection...'
+		);
 
 		const report = await validateNotionSync(projectRoot);
 
 		if (report.success) {
 			console.log('\n' + chalk.bold('🩺 Notion Sync Health Check'));
-			console.log('═' + '═'.repeat(35));
+			console.log('═' + '═'.repeat(45));
+
+			// Show hierarchy mode status
+			if (preserveFlattenTasks) {
+				console.log(
+					`🔧 Mode: ${chalk.yellow('Legacy flat sync (--preserve-flatten-tasks)')}`
+				);
+			} else {
+				console.log(`🚀 Mode: ${chalk.green('Hierarchical sync')}`);
+			}
+
 			console.log(
 				`📝 TaskMaster tasks: ${chalk.cyan(report.taskmasterTaskCount)}`
 			);
@@ -144,7 +173,12 @@ export async function validateNotionSyncCommand(options = {}) {
  * @param {Object} options - Command options
  */
 export async function resetNotionDBCommand(options = {}) {
-	const { projectRoot: providedRoot } = options;
+	const { projectRoot: providedRoot, preserveFlattenTasks = false } = options;
+
+	// Configure hierarchy behavior
+	if (preserveFlattenTasks) {
+		setHierarchicalSyncMode(false);
+	}
 
 	try {
 		const taskMaster = await initTaskMaster(providedRoot);
@@ -159,7 +193,10 @@ export async function resetNotionDBCommand(options = {}) {
 			process.exit(1);
 		}
 
-		log('info', 'RESET', 'Starting complete Notion DB reset...');
+		const modeText = preserveFlattenTasks
+			? ' (legacy flat mode)'
+			: ' (hierarchical mode)';
+		log('info', 'RESET', `Starting complete Notion DB reset${modeText}...`);
 		log(
 			'warn',
 			'RESET',
@@ -189,8 +226,14 @@ export async function repairNotionDBCommand(options = {}) {
 	const {
 		dryRun = false,
 		preserveExtraTasks = false,
+		preserveFlattenTasks = false,
 		projectRoot: providedRoot
 	} = options;
+
+	// Configure hierarchy behavior
+	if (preserveFlattenTasks) {
+		setHierarchicalSyncMode(false);
+	}
 
 	try {
 		const taskMaster = await initTaskMaster(providedRoot);
@@ -205,10 +248,13 @@ export async function repairNotionDBCommand(options = {}) {
 			process.exit(1);
 		}
 
+		const modeText = preserveFlattenTasks
+			? ' (legacy flat mode)'
+			: ' (hierarchical mode)';
 		log(
 			'info',
 			'REPAIR',
-			`${dryRun ? '[DRY RUN] ' : ''}Starting comprehensive Notion repair...`
+			`${dryRun ? '[DRY RUN] ' : ''}Starting comprehensive Notion repair${modeText}...`
 		);
 
 		const result = await repairNotionDB(projectRoot, {
@@ -298,6 +344,99 @@ export async function repairNotionDBCommand(options = {}) {
 		}
 	} catch (error) {
 		log('error', 'REPAIR', `Failed to repair Notion: ${error.message}`);
+		process.exit(1);
+	}
+}
+
+/**
+ * Command to validate Notion hierarchy setup
+ * @param {Object} options - Command options
+ */
+export async function validateNotionHierarchySetupCommand(options = {}) {
+	const { projectRoot: providedRoot } = options;
+
+	try {
+		const taskMaster = await initTaskMaster(providedRoot);
+		const projectRoot = taskMaster.getProjectRoot();
+
+		if (!projectRoot) {
+			log(
+				'error',
+				'VALIDATE-HIERARCHY',
+				'Project root not found. Please run this command from a TaskMaster project directory.'
+			);
+			process.exit(1);
+		}
+
+		await validateNotionHierarchySetup(projectRoot);
+	} catch (error) {
+		log(
+			'error',
+			'VALIDATE-HIERARCHY',
+			`Failed to validate hierarchy: ${error.message}`
+		);
+		process.exit(1);
+	}
+}
+
+/**
+ * Command to validate Notion hierarchy integrity
+ * @param {Object} options - Command options
+ */
+export async function validateNotionHierarchyIntegrityCommand(options = {}) {
+	const { projectRoot: providedRoot } = options;
+
+	try {
+		const taskMaster = await initTaskMaster(providedRoot);
+		const projectRoot = taskMaster.getProjectRoot();
+
+		if (!projectRoot) {
+			log(
+				'error',
+				'VALIDATE-HIERARCHY',
+				'Project root not found. Please run this command from a TaskMaster project directory.'
+			);
+			process.exit(1);
+		}
+
+		await validateNotionHierarchyIntegrity(projectRoot);
+	} catch (error) {
+		log(
+			'error',
+			'VALIDATE-HIERARCHY',
+			`Failed to validate hierarchy: ${error.message}`
+		);
+		process.exit(1);
+	}
+}
+
+/**
+ * Command to repair Notion hierarchy
+ * @param {Object} options - Command options
+ */
+export async function repairNotionHierarchyCommand(options = {}) {
+	const { projectRoot: providedRoot, dryRun = false } = options;
+
+	try {
+		const taskMaster = await initTaskMaster(providedRoot);
+		const projectRoot = taskMaster.getProjectRoot();
+
+		if (!projectRoot) {
+			log(
+				'error',
+				'REPAIR-HIERARCHY',
+				'Project root not found. Please run this command from a TaskMaster project directory.'
+			);
+			process.exit(1);
+		}
+
+		await repairNotionHierarchy(projectRoot, { dryRun });
+	} catch (error) {
+		log(
+			'error',
+			'REPAIR-HIERARCHY',
+			`Failed to repair hierarchy: ${error.message}`
+		);
 		process.exit(1);
 	}
 }

@@ -146,7 +146,10 @@ import {
 import {
 	validateNotionSyncCommand,
 	resetNotionDBCommand,
-	repairNotionDBCommand
+	repairNotionDBCommand,
+	validateNotionHierarchySetupCommand,
+	validateNotionHierarchyIntegrityCommand,
+	repairNotionHierarchyCommand
 } from './notion-commands.js';
 
 /**
@@ -4684,7 +4687,7 @@ Examples:
 	programInstance
 		.command('repair-notion-db')
 		.description(
-			'Intelligently repair Notion DB by removing duplicates and synchronizing missing TaskMaster tasks'
+			'Intelligently repair Notion DB with hierarchy support'
 		)
 		.option(
 			'--dry-run',
@@ -4694,10 +4697,15 @@ Examples:
 			'--preserve-extra-tasks',
 			'Keep tasks that exist in Notion DB but not in TaskMaster (default: remove them)'
 		)
+		.option(
+			'--preserve-flatten-tasks',
+			'Disable hierarchical sync, use legacy flat mode'
+		)
 		.action(async (options) => {
 			await repairNotionDBCommand({
 				dryRun: options.dryRun || false,
-				preserveExtraTasks: options.preserveExtraTasks || false
+				preserveExtraTasks: options.preserveExtraTasks || false,
+				preserveFlattenTasks: options.preserveFlattenTasks || false
 			});
 		});
 
@@ -4705,12 +4713,17 @@ Examples:
 	programInstance
 		.command('validate-notion-sync')
 		.description(
-			'Validate the integrity of Notion synchronization by comparing TaskMaster tasks with Notion DB tasks'
+			'Validate the integrity of Notion synchronization with hierarchy detection'
 		)
 		.option('-v, --verbose', 'Show detailed information about issues found')
+		.option(
+			'--preserve-flatten-tasks',
+			'Disable hierarchical sync, use legacy flat mode'
+		)
 		.action(async (options) => {
 			await validateNotionSyncCommand({
-				verbose: options.verbose || false
+				verbose: options.verbose || false,
+				preserveFlattenTasks: options.preserveFlattenTasks || false
 			});
 		});
 
@@ -4718,10 +4731,52 @@ Examples:
 	programInstance
 		.command('reset-notion-db')
 		.description(
-			'Completely reset the Notion DB by archiving all pages and recreating from TaskMaster tasks'
+			'Completely reset the Notion DB with hierarchy support'
+		)
+		.option(
+			'--preserve-flatten-tasks',
+			'Disable hierarchical sync, use legacy flat mode'
 		)
 		.action(async (options) => {
-			await resetNotionDBCommand(options);
+			await resetNotionDBCommand({
+				preserveFlattenTasks: options.preserveFlattenTasks || false
+			});
+		});
+
+	// validate-notion-hierarchy-setup command
+	programInstance
+		.command('validate-notion-hierarchy-setup')
+		.description(
+			'Validate that your Notion database has the required relation properties for hierarchical sync'
+		)
+		.action(async (options) => {
+			await validateNotionHierarchySetupCommand(options);
+		});
+
+	// validate-notion-hierarchy command
+	programInstance
+		.command('validate-notion-hierarchy')
+		.description(
+			'Validate the integrity of the task hierarchy between TaskMaster and Notion'
+		)
+		.action(async (options) => {
+			await validateNotionHierarchyIntegrityCommand(options);
+		});
+
+	// repair-notion-hierarchy command
+	programInstance
+		.command('repair-notion-hierarchy')
+		.description(
+			'Repair and update parent-child relationships in Notion to match TaskMaster hierarchy'
+		)
+		.option(
+			'-d, --dry-run',
+			'Preview changes without actually modifying the Notion DB'
+		)
+		.action(async (options) => {
+			await repairNotionHierarchyCommand({
+				dryRun: options.dryRun || false
+			});
 		});
 
 	return programInstance;
