@@ -97,18 +97,21 @@ async function clearSubtasks(tasksPath, taskIds, context = {}) {
 			// Create the tasks structure expected by syncTasksWithNotion
 			const prevTasks = {};
 			const currentTasks = {};
-			
+
 			// Use the tag from the data, or fallback to provided tag or 'master'
 			const currentTag = data.tag || tag || 'master';
-			
+
 			prevTasks[currentTag] = { tasks: originalData.tasks };
 			currentTasks[currentTag] = { tasks: data.tasks };
-			
+
 			await syncTasksWithNotion(prevTasks, currentTasks, projectRoot);
 			log('info', 'Notion sync completed successfully');
 		} catch (error) {
 			log('warn', `Failed to sync with Notion: ${error.message}`);
-			log('warn', 'Subtasks were cleared locally but may still exist in Notion');
+			log(
+				'warn',
+				'Subtasks were cleared locally but may still exist in Notion'
+			);
 		}
 
 		// Show summary table

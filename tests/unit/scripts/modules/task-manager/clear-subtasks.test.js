@@ -24,7 +24,7 @@ jest.unstable_mockModule('../../../../../scripts/modules/ui.js', () => ({
 	displayBanner: jest.fn()
 }));
 
-// Mock the notion.js module for sync functionality  
+// Mock the notion.js module for sync functionality
 jest.unstable_mockModule('../../../../../scripts/modules/notion.js', () => ({
 	syncTasksWithNotion: jest.fn().mockResolvedValue()
 }));
@@ -78,7 +78,9 @@ const generateTaskFiles = (
 		'../../../../../scripts/modules/task-manager/generate-task-files.js'
 	)
 ).default;
-const { syncTasksWithNotion } = await import('../../../../../scripts/modules/notion.js');
+const { syncTasksWithNotion } = await import(
+	'../../../../../scripts/modules/notion.js'
+);
 
 // Import the module under test
 const { default: clearSubtasks } = await import(
