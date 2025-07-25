@@ -1,5 +1,5 @@
 /**
- * tools/repair-notion.js
+ * tools/repair-notion-db.js
  * MCP tool for comprehensive Notion repair functionality
  */
 
@@ -7,7 +7,7 @@ import { runTaskMasterCommand } from '../utils/taskmaster.js';
 
 export function registerRepairNotionTool() {
     return {
-        name: 'repair-notion',
+        name: 'repair-notion-db',
         description: `Intelligently repair Notion database by removing duplicates and synchronizing missing tasks.
         
 This comprehensive repair tool:
@@ -31,7 +31,7 @@ Use --dry-run to preview changes without making them.`,
         },
         handler: async ({ dryRun = false }) => {
             try {
-                const args = ['repair-notion'];
+                const args = ['repair-notion-db'];
                 
                 if (dryRun) {
                     args.push('--dry-run');

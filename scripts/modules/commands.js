@@ -145,8 +145,8 @@ import {
 } from '../../src/utils/profiles.js';
 import {
 	validateNotionSyncCommand,
-	resetNotionCommand,
-	repairNotionCommand
+	resetNotionDBCommand,
+	repairNotionDBCommand
 } from './notion-commands.js';
 
 /**
@@ -4680,21 +4680,23 @@ Examples:
 			process.exit(1);
 		});
 
-	// repair-notion command - comprehensive repair tool
+	// repair-notion-db command - comprehensive repair tool
 	programInstance
-		.command('repair-notion')
-		.description('Intelligently repair Notion database by removing duplicates and synchronizing missing tasks')
-		.option('--dry-run', 'Show what would be changed without actually making changes')
+		.command('repair-notion-db')
+		.description('Intelligently repair Notion DB by removing duplicates and synchronizing missing TaskMaster tasks')
+		.option('--dry-run', 'Preview changes without applying them - shows what would be repaired')
+		.option('--preserve-extra-tasks', 'Keep tasks that exist in Notion DB but not in TaskMaster (default: remove them)')
 		.action(async (options) => {
-			await repairNotionCommand({
-				dryRun: options.dryRun || false
+			await repairNotionDBCommand({
+				dryRun: options.dryRun || false,
+				preserveExtraTasks: options.preserveExtraTasks || false
 			});
 		});
 
 	// validate-notion-sync command
 	programInstance
 		.command('validate-notion-sync')
-		.description('Validate the integrity of Notion synchronization by comparing local tasks with Notion pages')
+		.description('Validate the integrity of Notion synchronization by comparing TaskMaster tasks with Notion DB tasks')
 		.option('-v, --verbose', 'Show detailed information about issues found')
 		.action(async (options) => {
 			await validateNotionSyncCommand({
@@ -4702,12 +4704,12 @@ Examples:
 			});
 		});
 
-	// reset-notion command
+	// reset-notion-db command
 	programInstance
-		.command('reset-notion')
-		.description('Completely reset the Notion database by archiving all pages and recreating from local tasks')
+		.command('reset-notion-db')
+		.description('Completely reset the Notion DB by archiving all pages and recreating from TaskMaster tasks')
 		.action(async (options) => {
-			await resetNotionCommand(options);
+			await resetNotionDBCommand(options);
 		});
 
 	return programInstance;
