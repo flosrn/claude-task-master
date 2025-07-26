@@ -445,8 +445,22 @@ function flattenTasksWithTag(tasks, tag) {
 			const validSubtasks = t.subtasks.filter(
 				(st) => st.id !== undefined && st.id !== null
 			);
-			const subtaskIds = validSubtasks.map((st) => st.id);
 			flattenedSubtaskIds = validSubtasks.map((st) => `${t.id}.${st.id}`);
+		}
+
+		// Add parent task FIRST (so it gets created before subtasks)
+		arr.push({
+			id: t.id,
+			task: { ...t, _isSubtask: false, subtasks: flattenedSubtaskIds },
+			tag
+		});
+
+		// Then add subtasks (which can reference the parent that was just added)
+		if (Array.isArray(t.subtasks)) {
+			const validSubtasks = t.subtasks.filter(
+				(st) => st.id !== undefined && st.id !== null
+			);
+			const subtaskIds = validSubtasks.map((st) => st.id);
 
 			for (const st of validSubtasks) {
 				const subId = `${t.id}.${st.id}`;
@@ -482,12 +496,6 @@ function flattenTasksWithTag(tasks, tag) {
 				});
 			}
 		}
-		// Replace subtasks field with flattenedSubtaskIds
-		arr.push({
-			id: t.id,
-			task: { ...t, _isSubtask: false, subtasks: flattenedSubtaskIds },
-			tag
-		});
 	}
 	return arr;
 }
@@ -1769,11 +1777,39 @@ async function validateNotionSync(projectRoot) {
 			}
 		}
 
-		// 4. Find inconsistencies
+		// 4. Calculate task breakdown (main tasks vs subtasks)
+		let mainTaskCount = 0;
+		let subtaskCount = 0;
+		let notionMainTaskCount = 0;
+		let notionSubtaskCount = 0;
+		
+		// Analyze TaskMaster tasks
+		for (const taskId of localTasks.keys()) {
+			if (taskId.includes('.')) {
+				subtaskCount++;
+			} else {
+				mainTaskCount++;
+			}
+		}
+		
+		// Analyze Notion tasks
+		for (const taskId of notionTaskIds) {
+			if (taskId.includes('.')) {
+				notionSubtaskCount++;
+			} else {
+				notionMainTaskCount++;
+			}
+		}
+
+		// 5. Find inconsistencies
 		const report = {
 			success: true,
 			taskmasterTaskCount: localTasks.size,
+			mainTaskCount,
+			subtaskCount,
 			notionPageCount: notionPages.length,
+			notionMainTaskCount,
+			notionSubtaskCount,
 			notionTaskIdCount: notionTaskIds.size,
 			duplicatesInNotion: [],
 			missingInNotion: [],
@@ -2039,6 +2075,63 @@ async function resetNotionDB(projectRoot) {
 			currentData._rawTaggedData,
 			projectRoot
 		);
+
+		// 6. Update hierarchical relations for all recreated tasks
+		logger.info('[NOTION] Updating hierarchical relations for all recreated tasks...');
+		
+		// Check if hierarchical sync is available
+		const hierarchyCapabilitiesLocal = await detectHierarchyCapabilities();
+		const useHierarchicalSync = hierarchyCapabilitiesLocal?.canCreateWithHierarchy;
+		
+		if (useHierarchicalSync) {
+			// Get current tag and mapping
+			const taskMaster = currentTaskMaster;
+			const currentTag = taskMaster ? taskMaster.getCurrentTag() : 'master';
+			const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+			const { mapping } = loadNotionSyncMapping(mappingFile);
+			
+			if (currentData._rawTaggedData[currentTag] && currentData._rawTaggedData[currentTag].tasks) {
+				// Flatten tasks for hierarchical update
+				const flattenedTasks = [];
+				for (const task of currentData._rawTaggedData[currentTag].tasks) {
+					// Parent task
+					flattenedTasks.push({
+						id: String(task.id),
+						task: { ...task, _isSubtask: false },
+						tag: currentTag
+					});
+					// Subtasks
+					if (Array.isArray(task.subtasks)) {
+						for (const subtask of task.subtasks) {
+							const subtaskId = `${task.id}.${subtask.id}`;
+							flattenedTasks.push({
+								id: subtaskId,
+								task: {
+									...subtask,
+									id: subtaskId,
+									_parentId: String(task.id),
+									_isSubtask: true
+								},
+								tag: currentTag
+							});
+						}
+					}
+				}
+				
+				// Update hierarchical relations
+				const { updateHierarchicalRelations } = await import('./notion-hierarchy.js');
+				await updateHierarchicalRelations(
+					flattenedTasks,
+					currentTag,
+					mapping,
+					notion,
+					{
+						debug: false,
+						useDependencyRelations: hierarchyCapabilitiesLocal.hasDependencyRelations
+					}
+				);
+			}
+		}
 
 		logger.info('[NOTION] Notion DB reset completed successfully');
 
@@ -2574,6 +2667,15 @@ async function repairNotionDB(projectRoot, options = {}) {
 	}
 }
 
+// Getter functions for private module variables
+function getNotionClient() {
+	return notion;
+}
+
+function getIsNotionEnabled() {
+	return isNotionEnabled;
+}
+
 export {
 	setMcpLoggerForNotion,
 	setHierarchicalSyncMode,
@@ -2583,5 +2685,11 @@ export {
 	updateNotionComplexityForCurrentTag,
 	validateNotionSync,
 	resetNotionDB,
-	repairNotionDB
+	repairNotionDB,
+	loadNotionSyncMapping,
+	saveNotionSyncMapping,
+	initNotion,
+	getNotionClient,
+	getIsNotionEnabled,
+	fetchAllNotionPages
 };

@@ -7,7 +7,6 @@ import path from 'path';
 import { log } from './utils.js';
 import {
 	validateNotionSync,
-	resetNotionDB,
 	repairNotionDB,
 	setHierarchicalSyncMode
 } from './notion.js';
@@ -65,10 +64,17 @@ export async function validateNotionSyncCommand(options = {}) {
 				console.log(`🚀 Mode: ${chalk.green('Hierarchical sync')}`);
 			}
 
-			console.log(
-				`📝 TaskMaster tasks: ${chalk.cyan(report.taskmasterTaskCount)}`
-			);
-			console.log(`📄 Notion DB tasks: ${chalk.cyan(report.notionPageCount)}`);
+			// TaskMaster tasks breakdown
+			const taskmasterDetails = report.mainTaskCount > 0 || report.subtaskCount > 0 
+				? `${chalk.cyan(report.taskmasterTaskCount)} (${chalk.green(report.mainTaskCount)} main tasks, ${chalk.blue(report.subtaskCount)} subtasks)`
+				: chalk.cyan(report.taskmasterTaskCount);
+			console.log(`📝 TaskMaster tasks: ${taskmasterDetails}`);
+
+			// Notion DB tasks breakdown
+			const notionDetails = report.notionMainTaskCount > 0 || report.notionSubtaskCount > 0
+				? `${chalk.cyan(report.notionPageCount)} (${chalk.green(report.notionMainTaskCount)} main tasks, ${chalk.blue(report.notionSubtaskCount)} subtasks)`
+				: chalk.cyan(report.notionPageCount);
+			console.log(`📄 Notion DB tasks: ${notionDetails}`);
 
 			// Show issues if any
 			const hasIssues =
@@ -173,46 +179,19 @@ export async function validateNotionSyncCommand(options = {}) {
  * @param {Object} options - Command options
  */
 export async function resetNotionDBCommand(options = {}) {
-	const { projectRoot: providedRoot, preserveFlattenTasks = false } = options;
+	// Import the new ResetNotionCommand
+	const { ResetNotionCommand } = await import('./notion-reset-command.js');
+	
+	// Create command instance and execute
+	const resetCommand = new ResetNotionCommand();
+	const result = await resetCommand.execute(options);
 
-	// Configure hierarchy behavior
-	if (preserveFlattenTasks) {
-		setHierarchicalSyncMode(false);
-	}
-
-	try {
-		const taskMaster = await initTaskMaster(providedRoot);
-		const projectRoot = taskMaster.getProjectRoot();
-
-		if (!projectRoot) {
-			log(
-				'error',
-				'RESET',
-				'Project root not found. Please run this command from a TaskMaster project directory.'
-			);
-			process.exit(1);
-		}
-
-		const modeText = preserveFlattenTasks
-			? ' (legacy flat mode)'
-			: ' (hierarchical mode)';
-		log('info', 'RESET', `Starting complete Notion DB reset${modeText}...`);
-		log(
-			'warn',
-			'RESET',
-			'This will archive ALL existing pages in Notion DB and recreate them from TaskMaster tasks.'
-		);
-
-		const result = await resetNotionDB(projectRoot);
-
-		if (result.success) {
-			log('success', 'RESET', result.message);
-		} else {
-			log('error', 'RESET', `Reset failed: ${result.error}`);
-			process.exit(1);
-		}
-	} catch (error) {
-		log('error', 'RESET', `Failed to reset Notion database: ${error.message}`);
+	// Handle result consistently with new error handling
+	if (result.success) {
+		// Success already logged by the command
+		return result;
+	} else {
+		// Error handling and suggestions already provided by ErrorHandler
 		process.exit(1);
 	}
 }
