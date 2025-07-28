@@ -4686,9 +4686,7 @@ Examples:
 	// repair-notion-db command - comprehensive repair tool
 	programInstance
 		.command('repair-notion-db')
-		.description(
-			'Intelligently repair Notion DB with hierarchy support'
-		)
+		.description('Intelligently repair Notion DB with hierarchy support')
 		.option(
 			'--dry-run',
 			'Preview changes without applying them - shows what would be repaired'
@@ -4730,9 +4728,7 @@ Examples:
 	// reset-notion-db command
 	programInstance
 		.command('reset-notion-db')
-		.description(
-			'Completely reset the Notion DB with hierarchy support'
-		)
+		.description('Completely reset the Notion DB with hierarchy support')
 		.option(
 			'--preserve-flatten-tasks',
 			'Disable hierarchical sync, use legacy flat mode'

@@ -65,15 +65,17 @@ export async function validateNotionSyncCommand(options = {}) {
 			}
 
 			// TaskMaster tasks breakdown
-			const taskmasterDetails = report.mainTaskCount > 0 || report.subtaskCount > 0 
-				? `${chalk.cyan(report.taskmasterTaskCount)} (${chalk.green(report.mainTaskCount)} main tasks, ${chalk.blue(report.subtaskCount)} subtasks)`
-				: chalk.cyan(report.taskmasterTaskCount);
+			const taskmasterDetails =
+				report.mainTaskCount > 0 || report.subtaskCount > 0
+					? `${chalk.cyan(report.taskmasterTaskCount)} (${chalk.green(report.mainTaskCount)} main tasks, ${chalk.blue(report.subtaskCount)} subtasks)`
+					: chalk.cyan(report.taskmasterTaskCount);
 			console.log(`📝 TaskMaster tasks: ${taskmasterDetails}`);
 
 			// Notion DB tasks breakdown
-			const notionDetails = report.notionMainTaskCount > 0 || report.notionSubtaskCount > 0
-				? `${chalk.cyan(report.notionPageCount)} (${chalk.green(report.notionMainTaskCount)} main tasks, ${chalk.blue(report.notionSubtaskCount)} subtasks)`
-				: chalk.cyan(report.notionPageCount);
+			const notionDetails =
+				report.notionMainTaskCount > 0 || report.notionSubtaskCount > 0
+					? `${chalk.cyan(report.notionPageCount)} (${chalk.green(report.notionMainTaskCount)} main tasks, ${chalk.blue(report.notionSubtaskCount)} subtasks)`
+					: chalk.cyan(report.notionPageCount);
 			console.log(`📄 Notion DB tasks: ${notionDetails}`);
 
 			// Show issues if any
@@ -181,7 +183,7 @@ export async function validateNotionSyncCommand(options = {}) {
 export async function resetNotionDBCommand(options = {}) {
 	// Import the new ResetNotionCommand
 	const { ResetNotionCommand } = await import('./notion-reset-command.js');
-	
+
 	// Create command instance and execute
 	const resetCommand = new ResetNotionCommand();
 	const result = await resetCommand.execute(options);

@@ -144,9 +144,7 @@ function initNotion() {
 
 				// Log current sync mode
 				if (useHierarchicalSync && hierarchyCapabilities?.isFullyConfigured) {
-					logger.success(
-						'🚀 Hierarchical sync enabled by default'
-					);
+					logger.success('🚀 Hierarchical sync enabled by default');
 				} else if (!useHierarchicalSync) {
 					logger.info(
 						'🔧 Legacy mode: Flat sync preserved (--preserve-flatten-tasks)'
@@ -1136,7 +1134,11 @@ async function updateAllTaskRelationsInNotion(
 ) {
 	// Performance optimization: skip if hierarchical relations already created during task creation
 	// But allow forcing update when explicitly requested (e.g., after repair)
-	if (!forceUpdate && useHierarchicalSync && hierarchyCapabilities?.canCreateWithHierarchy) {
+	if (
+		!forceUpdate &&
+		useHierarchicalSync &&
+		hierarchyCapabilities?.canCreateWithHierarchy
+	) {
 		logger.debug(
 			'Hierarchical relations already created during task creation, skipping redundant updates'
 		);
@@ -1355,9 +1357,16 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 						mappingFile
 					);
 				} else {
-					await addTaskToNotion(change.cur, newTag, mapping, meta, mappingFile, {
-						preserveFlattenTasks: !useHierarchicalSync
-					});
+					await addTaskToNotion(
+						change.cur,
+						newTag,
+						mapping,
+						meta,
+						mappingFile,
+						{
+							preserveFlattenTasks: !useHierarchicalSync
+						}
+					);
 					({ mapping } = loadNotionSyncMapping(mappingFile));
 				}
 			}
@@ -1782,7 +1791,7 @@ async function validateNotionSync(projectRoot) {
 		let subtaskCount = 0;
 		let notionMainTaskCount = 0;
 		let notionSubtaskCount = 0;
-		
+
 		// Analyze TaskMaster tasks
 		for (const taskId of localTasks.keys()) {
 			if (taskId.includes('.')) {
@@ -1791,7 +1800,7 @@ async function validateNotionSync(projectRoot) {
 				mainTaskCount++;
 			}
 		}
-		
+
 		// Analyze Notion tasks
 		for (const taskId of notionTaskIds) {
 			if (taskId.includes('.')) {
@@ -2077,20 +2086,29 @@ async function resetNotionDB(projectRoot) {
 		);
 
 		// 6. Update hierarchical relations for all recreated tasks
-		logger.info('[NOTION] Updating hierarchical relations for all recreated tasks...');
-		
+		logger.info(
+			'[NOTION] Updating hierarchical relations for all recreated tasks...'
+		);
+
 		// Check if hierarchical sync is available
 		const hierarchyCapabilitiesLocal = await detectHierarchyCapabilities();
-		const useHierarchicalSync = hierarchyCapabilitiesLocal?.canCreateWithHierarchy;
-		
+		const useHierarchicalSync =
+			hierarchyCapabilitiesLocal?.canCreateWithHierarchy;
+
 		if (useHierarchicalSync) {
 			// Get current tag and mapping
 			const taskMaster = currentTaskMaster;
 			const currentTag = taskMaster ? taskMaster.getCurrentTag() : 'master';
-			const mappingFile = path.resolve(projectRoot, TASKMASTER_NOTION_SYNC_FILE);
+			const mappingFile = path.resolve(
+				projectRoot,
+				TASKMASTER_NOTION_SYNC_FILE
+			);
 			const { mapping } = loadNotionSyncMapping(mappingFile);
-			
-			if (currentData._rawTaggedData[currentTag] && currentData._rawTaggedData[currentTag].tasks) {
+
+			if (
+				currentData._rawTaggedData[currentTag] &&
+				currentData._rawTaggedData[currentTag].tasks
+			) {
 				// Flatten tasks for hierarchical update
 				const flattenedTasks = [];
 				for (const task of currentData._rawTaggedData[currentTag].tasks) {
@@ -2117,9 +2135,11 @@ async function resetNotionDB(projectRoot) {
 						}
 					}
 				}
-				
+
 				// Update hierarchical relations
-				const { updateHierarchicalRelations } = await import('./notion-hierarchy.js');
+				const { updateHierarchicalRelations } = await import(
+					'./notion-hierarchy.js'
+				);
 				await updateHierarchicalRelations(
 					flattenedTasks,
 					currentTag,
@@ -2127,7 +2147,8 @@ async function resetNotionDB(projectRoot) {
 					notion,
 					{
 						debug: false,
-						useDependencyRelations: hierarchyCapabilitiesLocal.hasDependencyRelations
+						useDependencyRelations:
+							hierarchyCapabilitiesLocal.hasDependencyRelations
 					}
 				);
 			}
@@ -2397,8 +2418,15 @@ async function repairNotionDB(projectRoot, options = {}) {
 
 		// Update relations if tasks were added or hierarchical sync is enabled
 		if (!dryRun && (tasksAdded > 0 || useHierarchicalSync)) {
-			logger.info(tasksAdded > 0 ? 'Updating hierarchical relations for newly added tasks...' : 'Updating hierarchical relations to fix any broken connections...');
-			if (useHierarchicalSync && hierarchyCapabilities?.canCreateWithHierarchy) {
+			logger.info(
+				tasksAdded > 0
+					? 'Updating hierarchical relations for newly added tasks...'
+					: 'Updating hierarchical relations to fix any broken connections...'
+			);
+			if (
+				useHierarchicalSync &&
+				hierarchyCapabilities?.canCreateWithHierarchy
+			) {
 				// Use hierarchical relations update
 				const taskmasterTasksFile = taskMaster
 					? taskMaster.getTasksPath()
@@ -2435,7 +2463,9 @@ async function repairNotionDB(projectRoot, options = {}) {
 							}
 						}
 						// Update hierarchical relations
-						const { updateHierarchicalRelations } = await import('./notion-hierarchy.js');
+						const { updateHierarchicalRelations } = await import(
+							'./notion-hierarchy.js'
+						);
 						await updateHierarchicalRelations(
 							flattenedTasks,
 							currentTag,
@@ -2443,7 +2473,8 @@ async function repairNotionDB(projectRoot, options = {}) {
 							notion,
 							{
 								debug: false,
-								useDependencyRelations: hierarchyCapabilities.hasDependencyRelations
+								useDependencyRelations:
+									hierarchyCapabilities.hasDependencyRelations
 							}
 						);
 					}
@@ -2455,7 +2486,12 @@ async function repairNotionDB(projectRoot, options = {}) {
 					: path.join(projectRoot, TASKMASTER_TASKS_FILE);
 				const currentTasksData = readJSON(taskmasterTasksFile, projectRoot);
 				if (currentTasksData && currentTasksData._rawTaggedData) {
-					await updateAllTaskRelationsInNotion(currentTasksData._rawTaggedData, mapping, false, true);
+					await updateAllTaskRelationsInNotion(
+						currentTasksData._rawTaggedData,
+						mapping,
+						false,
+						true
+					);
 				}
 			}
 		}
@@ -2634,7 +2670,9 @@ async function repairNotionDB(projectRoot, options = {}) {
 		}
 
 		// Recalculate final Notion page count after all operations
-		const finalNotionPages = dryRun ? notionPages : (updatedNotionPages || await fetchAllNotionPages());
+		const finalNotionPages = dryRun
+			? notionPages
+			: updatedNotionPages || (await fetchAllNotionPages());
 
 		// Final report
 		const report = {

@@ -47,7 +47,7 @@ export class ArchivePagesOperation extends BaseOperation {
 
 	async execute() {
 		this.logger.info(`Archiving ${this.pages.length} pages...`);
-		
+
 		const results = {
 			succeeded: 0,
 			failed: 0,
@@ -59,16 +59,18 @@ export class ArchivePagesOperation extends BaseOperation {
 		const BATCH_SIZE = 10;
 		for (let i = 0; i < this.pages.length; i += BATCH_SIZE) {
 			const batch = this.pages.slice(i, i + BATCH_SIZE);
-			const batchPromises = batch.map(page => this.archivePage(page));
-			
+			const batchPromises = batch.map((page) => this.archivePage(page));
+
 			const batchResults = await Promise.allSettled(batchPromises);
-			
+
 			for (const [index, result] of batchResults.entries()) {
 				if (result.status === 'fulfilled') {
 					results.succeeded++;
 					this.archivedPages.push({
 						pageId: batch[index].id,
-						title: batch[index].properties?.Name?.title?.[0]?.text?.content || 'Untitled',
+						title:
+							batch[index].properties?.Name?.title?.[0]?.text?.content ||
+							'Untitled',
 						originalData: batch[index] // Store for potential rollback
 					});
 				} else {
@@ -81,8 +83,10 @@ export class ArchivePagesOperation extends BaseOperation {
 			}
 		}
 
-		this.logger.success(`Archived ${results.succeeded}/${this.pages.length} pages`);
-		
+		this.logger.success(
+			`Archived ${results.succeeded}/${this.pages.length} pages`
+		);
+
 		if (results.failed > 0) {
 			this.logger.warn(`${results.failed} pages failed to archive`);
 		}
@@ -108,8 +112,10 @@ export class ArchivePagesOperation extends BaseOperation {
 			return;
 		}
 
-		this.logger.warn(`Restoring ${this.archivedPages.length} archived pages...`);
-		
+		this.logger.warn(
+			`Restoring ${this.archivedPages.length} archived pages...`
+		);
+
 		const restorePromises = this.archivedPages.map(async (archivedPage) => {
 			try {
 				await this.notion.pages.update({
@@ -118,15 +124,25 @@ export class ArchivePagesOperation extends BaseOperation {
 				});
 				return { success: true, pageId: archivedPage.pageId };
 			} catch (error) {
-				this.logger.error(`Failed to restore page ${archivedPage.pageId}: ${error.message}`);
-				return { success: false, pageId: archivedPage.pageId, error: error.message };
+				this.logger.error(
+					`Failed to restore page ${archivedPage.pageId}: ${error.message}`
+				);
+				return {
+					success: false,
+					pageId: archivedPage.pageId,
+					error: error.message
+				};
 			}
 		});
 
 		const restoreResults = await Promise.allSettled(restorePromises);
-		const restored = restoreResults.filter(r => r.status === 'fulfilled' && r.value.success).length;
-		
-		this.logger.success(`Restored ${restored}/${this.archivedPages.length} pages`);
+		const restored = restoreResults.filter(
+			(r) => r.status === 'fulfilled' && r.value.success
+		).length;
+
+		this.logger.success(
+			`Restored ${restored}/${this.archivedPages.length} pages`
+		);
 	}
 }
 
@@ -143,7 +159,7 @@ export class CreatePagesOperation extends BaseOperation {
 
 	async execute() {
 		this.logger.info(`Creating ${this.tasksToCreate.length} new pages...`);
-		
+
 		const results = {
 			succeeded: 0,
 			failed: 0,
@@ -155,7 +171,7 @@ export class CreatePagesOperation extends BaseOperation {
 		const BATCH_SIZE = 5; // Smaller batch for creates
 		for (let i = 0; i < this.tasksToCreate.length; i += BATCH_SIZE) {
 			const batch = this.tasksToCreate.slice(i, i + BATCH_SIZE);
-			
+
 			for (const taskInfo of batch) {
 				try {
 					const createdPage = await this.createPage(taskInfo);
@@ -173,12 +189,14 @@ export class CreatePagesOperation extends BaseOperation {
 
 			// Small delay between batches to respect rate limits
 			if (i + BATCH_SIZE < this.tasksToCreate.length) {
-				await new Promise(resolve => setTimeout(resolve, 100));
+				await new Promise((resolve) => setTimeout(resolve, 100));
 			}
 		}
 
-		this.logger.success(`Created ${results.succeeded}/${this.tasksToCreate.length} pages`);
-		
+		this.logger.success(
+			`Created ${results.succeeded}/${this.tasksToCreate.length} pages`
+		);
+
 		if (results.failed > 0) {
 			this.logger.warn(`${results.failed} pages failed to create`);
 		}
@@ -188,14 +206,14 @@ export class CreatePagesOperation extends BaseOperation {
 
 	async createPage(taskInfo) {
 		const { task, properties } = taskInfo;
-		
+
 		const pageData = {
 			parent: { database_id: this.databaseId },
 			properties: properties
 		};
 
 		const createdPage = await this.notion.pages.create(pageData);
-		
+
 		return {
 			pageId: createdPage.id,
 			taskId: task.id,
@@ -210,9 +228,9 @@ export class CreatePagesOperation extends BaseOperation {
 		}
 
 		this.logger.warn(`Removing ${this.createdPages.length} created pages...`);
-		
+
 		const archiveOperation = new ArchivePagesOperation(
-			this.createdPages.map(cp => ({ id: cp.pageId })),
+			this.createdPages.map((cp) => ({ id: cp.pageId })),
 			{ notion: this.notion, logger: this.logger }
 		);
 
@@ -239,7 +257,9 @@ export class UpdateMappingOperation extends BaseOperation {
 				this.originalContent = fs.readFileSync(this.mappingFile, 'utf8');
 			}
 		} catch (error) {
-			this.logger.warn(`Could not backup original mapping file: ${error.message}`);
+			this.logger.warn(
+				`Could not backup original mapping file: ${error.message}`
+			);
 		}
 
 		// Write new content
@@ -253,9 +273,9 @@ export class UpdateMappingOperation extends BaseOperation {
 		);
 
 		fs.writeFileSync(this.mappingFile, content, 'utf8');
-		
+
 		this.logger.success('Mapping file updated successfully');
-		
+
 		return {
 			mappingFile: this.mappingFile,
 			mappingCount: Object.keys(this.newMapping).length
@@ -301,15 +321,17 @@ export class ClearMappingOperation extends BaseOperation {
 				this.originalContent = fs.readFileSync(this.mappingFile, 'utf8');
 			}
 		} catch (error) {
-			this.logger.warn(`Could not backup original mapping file: ${error.message}`);
+			this.logger.warn(
+				`Could not backup original mapping file: ${error.message}`
+			);
 		}
 
 		// Clear mapping
 		const emptyContent = JSON.stringify({ mapping: {}, meta: {} }, null, 2);
 		fs.writeFileSync(this.mappingFile, emptyContent, 'utf8');
-		
+
 		this.logger.success('Mapping file cleared');
-		
+
 		return {
 			mappingFile: this.mappingFile,
 			cleared: true
@@ -342,7 +364,7 @@ export class CompositeOperation extends BaseOperation {
 
 	async execute() {
 		const results = [];
-		
+
 		for (const operation of this.operations) {
 			try {
 				const result = await operation.execute();
@@ -369,7 +391,9 @@ export class CompositeOperation extends BaseOperation {
 			try {
 				await operation.rollback(result);
 			} catch (rollbackError) {
-				this.logger.error(`Rollback failed for ${operation.name}: ${rollbackError.message}`);
+				this.logger.error(
+					`Rollback failed for ${operation.name}: ${rollbackError.message}`
+				);
 			}
 		}
 		this.executedOperations = [];

@@ -29,8 +29,13 @@ export class NotionCommandContext {
 		this.verbose = verbose;
 
 		// Derived paths
-		this.mappingFile = path.resolve(projectRoot, '.taskmaster/notion-sync.json');
-		this.tasksFile = taskMaster ? taskMaster.getTasksPath() : path.join(projectRoot, '.taskmaster/tasks.json');
+		this.mappingFile = path.resolve(
+			projectRoot,
+			'.taskmaster/notion-sync.json'
+		);
+		this.tasksFile = taskMaster
+			? taskMaster.getTasksPath()
+			: path.join(projectRoot, '.taskmaster/tasks.json');
 		this.currentTag = taskMaster ? taskMaster.getCurrentTag() : 'master';
 
 		// Configuration
@@ -41,9 +46,7 @@ export class NotionCommandContext {
 	 * Get mode description for logging
 	 */
 	getModeDescription() {
-		return this.preserveFlattenTasks 
-			? 'legacy flat mode' 
-			: 'hierarchical mode';
+		return this.preserveFlattenTasks ? 'legacy flat mode' : 'hierarchical mode';
 	}
 
 	/**
@@ -67,9 +70,9 @@ export class NotionErrorHandler {
 	 */
 	static handleError(error, commandName, context) {
 		const errorInfo = this.analyzeError(error);
-		
+
 		log('error', commandName.toUpperCase(), `${errorInfo.message}`);
-		
+
 		if (errorInfo.suggestion) {
 			log('info', commandName.toUpperCase(), `💡 ${errorInfo.suggestion}`);
 		}
@@ -133,7 +136,7 @@ export class NotionErrorHandler {
 			return {
 				code: 'FILE_NOT_FOUND',
 				message: 'Required file not found',
-				suggestion: 'Make sure you\'re in a TaskMaster project directory',
+				suggestion: "Make sure you're in a TaskMaster project directory",
 				details: error.message
 			};
 		}
@@ -178,7 +181,7 @@ export class TransactionManager {
 
 		try {
 			const result = await operation.execute();
-			
+
 			// Store operation for potential rollback
 			this.operations.push({
 				operation,
@@ -203,25 +206,37 @@ export class TransactionManager {
 		}
 
 		this.rollbackInProgress = true;
-		log('warn', this.commandName.toUpperCase(), '🔄 Rolling back operations...');
+		log(
+			'warn',
+			this.commandName.toUpperCase(),
+			'🔄 Rolling back operations...'
+		);
 
 		const rollbackErrors = [];
 
 		// Rollback in reverse order
 		for (let i = this.operations.length - 1; i >= 0; i--) {
 			const { operation, result } = this.operations[i];
-			
+
 			try {
 				if (operation.rollback) {
 					await operation.rollback(result);
-					log('info', this.commandName.toUpperCase(), `✅ Rolled back: ${operation.name || 'operation'}`);
+					log(
+						'info',
+						this.commandName.toUpperCase(),
+						`✅ Rolled back: ${operation.name || 'operation'}`
+					);
 				}
 			} catch (rollbackError) {
 				rollbackErrors.push({
 					operation: operation.name,
 					error: rollbackError.message
 				});
-				log('error', this.commandName.toUpperCase(), `❌ Rollback failed: ${operation.name} - ${rollbackError.message}`);
+				log(
+					'error',
+					this.commandName.toUpperCase(),
+					`❌ Rollback failed: ${operation.name} - ${rollbackError.message}`
+				);
 			}
 		}
 
@@ -229,9 +244,17 @@ export class TransactionManager {
 		this.rollbackInProgress = false;
 
 		if (rollbackErrors.length > 0) {
-			log('warn', this.commandName.toUpperCase(), `⚠️  ${rollbackErrors.length} rollback operations failed`);
+			log(
+				'warn',
+				this.commandName.toUpperCase(),
+				`⚠️  ${rollbackErrors.length} rollback operations failed`
+			);
 		} else {
-			log('success', this.commandName.toUpperCase(), '✅ All operations rolled back successfully');
+			log(
+				'success',
+				this.commandName.toUpperCase(),
+				'✅ All operations rolled back successfully'
+			);
 		}
 
 		return rollbackErrors;
@@ -242,7 +265,11 @@ export class TransactionManager {
 	 */
 	commit() {
 		this.operations = [];
-		log('info', this.commandName.toUpperCase(), '✅ Transaction committed successfully');
+		log(
+			'info',
+			this.commandName.toUpperCase(),
+			'✅ Transaction committed successfully'
+		);
 	}
 
 	/**
@@ -271,26 +298,25 @@ export default class BaseNotionCommand {
 	 */
 	async execute(options = {}) {
 		const transactionManager = new TransactionManager(this.commandName);
-		
+
 		try {
 			// Phase 1: Initialize context with common logic
 			const context = await this.initializeContext(options);
-			
-			// Phase 2: Validate prerequisites 
+
+			// Phase 2: Validate prerequisites
 			await this.validatePrerequisites(context);
-			
+
 			// Phase 3: Execute command-specific logic
 			const result = await this.runCommand(context, transactionManager);
-			
+
 			// Phase 4: Commit transaction on success
 			transactionManager.commit();
-			
-			return NotionErrorHandler.createSuccessResult(result);
 
+			return NotionErrorHandler.createSuccessResult(result);
 		} catch (error) {
 			// Automatic rollback on any error
 			await transactionManager.rollback();
-			
+
 			// Standardized error handling
 			return NotionErrorHandler.handleError(error, this.commandName, options);
 		}
@@ -312,7 +338,9 @@ export default class BaseNotionCommand {
 		const projectRoot = taskMaster.getProjectRoot();
 
 		if (!projectRoot) {
-			throw new Error('Project root not found. Please run this command from a TaskMaster project directory.');
+			throw new Error(
+				'Project root not found. Please run this command from a TaskMaster project directory.'
+			);
 		}
 
 		// Create standardized context
@@ -325,8 +353,12 @@ export default class BaseNotionCommand {
 		// Log command start with unified format
 		const modeText = ` (${context.getModeDescription()})`;
 		const optionsText = context.getOptionsDescription();
-		
-		log('info', this.commandName.toUpperCase(), `Starting ${this.getCommandDescription()}${modeText}${optionsText}...`);
+
+		log(
+			'info',
+			this.commandName.toUpperCase(),
+			`Starting ${this.getCommandDescription()}${modeText}${optionsText}...`
+		);
 
 		return context;
 	}
