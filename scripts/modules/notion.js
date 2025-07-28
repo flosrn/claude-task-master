@@ -8,6 +8,7 @@ import {
 } from '../../src/constants/paths.js';
 import { currentTaskMaster } from '../../src/task-master.js';
 import { getCurrentTag, log, readJSON } from './utils.js';
+import { generateTaskEmoji } from './notion-emoji-ai.js';
 import {
 	buildHierarchicalRelations,
 	updateHierarchicalRelations,
@@ -702,9 +703,17 @@ function splitRichTextByWord(content, chunkSize = 2000) {
 
 // --- Notion-related API functions start here ---
 // Notion property mapping function
-function buildNotionProperties(task, tag, now = new Date()) {
+async function buildNotionProperties(task, tag, now = new Date()) {
 	// Date property logic
 	const dateProps = buildDateProperties(task, now);
+
+	// Générer l'emoji avec l'IA (avec fallback en cas d'erreur)
+	let taskEmoji = '📋'; // Emoji par défaut
+	try {
+		taskEmoji = await generateTaskEmoji(task);
+	} catch (error) {
+		log('warn', `[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}`);
+	}
 
 	return {
 		title: { title: splitRichTextByWord(task.title || '') },
@@ -717,7 +726,9 @@ function buildNotionProperties(task, tag, now = new Date()) {
 		status: task.status ? { status: { name: task.status } } : undefined,
 		complexity:
 			task.complexity !== undefined ? { number: task.complexity } : undefined,
-		...dateProps
+		...dateProps,
+		// Ajouter l'emoji généré par l'IA
+		icon: { emoji: taskEmoji }
 	};
 }
 
@@ -870,7 +881,7 @@ async function addTaskToNotion(
 		!options.preserveFlattenTasks;
 
 	const { includeRelations = shouldUseHierarchy } = options;
-	const properties = buildNotionProperties(task, tag);
+	const properties = await buildNotionProperties(task, tag);
 
 	// Add hierarchical relations during creation (not after)
 	if (includeRelations && task._parentId) {
@@ -935,7 +946,7 @@ async function addTaskToNotion(
 async function updateTaskInNotion(task, tag, mapping, meta, mappingFile) {
 	const notionId = getNotionPageId(mapping, tag, task.id);
 	if (!notionId) throw new Error('Notion page id not found for update');
-	const properties = buildNotionProperties(task, tag);
+	const properties = await buildNotionProperties(task, tag);
 	await executeWithRetry(() =>
 		notion.pages.update({
 			page_id: notionId,
