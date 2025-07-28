@@ -7,48 +7,54 @@ import { generateTextService } from './ai-services-unified.js';
 import { log } from './utils.js';
 
 /**
- * Cache pour éviter de re-demander l'IA pour les mêmes tâches
+ * Cache to avoid re-requesting AI for the same tasks
  */
 const emojiCache = new Map();
 
 /**
- * Génère un emoji approprié pour une tâche en utilisant l'IA
- * @param {Object} task - La tâche (avec title, description, etc.)
- * @returns {Promise<string>} L'emoji choisi par l'IA ou emoji par défaut
+ * Generates an appropriate emoji for a task using AI
+ * @param {Object} task - The task (with title, description, etc.)
+ * @param {string} projectRoot - Project root directory (optional, for TaskMaster)
+ * @param {string} session - Session ID (optional, for TaskMaster)
+ * @returns {Promise<string>} The emoji chosen by AI or default emoji
  */
-export async function generateTaskEmoji(task) {
+export async function generateTaskEmoji(task, projectRoot = process.cwd(), session = null) {
 	try {
-		// Créer une clé de cache basée sur le contenu de la tâche
+		// Create a cache key based on task content
 		const cacheKey = generateCacheKey(task);
 		
-		// Vérifier le cache d'abord
+		// Check cache first
 		if (emojiCache.has(cacheKey)) {
 			log('debug', `[EMOJI] Cache hit for task: ${task.title}`);
 			return emojiCache.get(cacheKey);
 		}
 
-		// Préparer le contexte de la tâche pour l'IA
+		// Prepare task context for AI
 		const taskContext = buildTaskContext(task);
 		
-		// Prompt optimisé pour l'IA
+		// Optimized prompt for AI
 		const prompt = buildEmojiPrompt(taskContext);
 		
 		log('debug', `[EMOJI] Requesting AI emoji for: ${task.title}`);
 		
-		// Appel IA avec timeout et fallback
+		// AI call with timeout and fallback - uses TaskMaster/Claude Code
 		const response = await generateTextService({
 			prompt,
-			role: 'main', // Utilise le modèle principal configuré
-			outputType: 'cli'
+			role: 'main', // Use configured main model
+			session: session,
+			projectRoot: projectRoot,
+			commandName: 'emoji-generation',
+			outputType: session ? 'mcp' : 'cli' // MCP if session provided, otherwise CLI
 		});
 		
-		// Extraire l'emoji de la réponse
-		const emoji = extractEmojiFromResponse(response.text);
+		// Extract emoji from response (response.mainResult for unified system)
+		const responseText = response.mainResult || response.text || response;
+		const emoji = extractEmojiFromResponse(responseText);
 		
-		// Valider l'emoji
+		// Validate emoji
 		const validEmoji = validateEmoji(emoji);
 		
-		// Mettre en cache pour éviter les appels futurs
+		// Cache to avoid future calls
 		emojiCache.set(cacheKey, validEmoji);
 		
 		log('debug', `[EMOJI] Generated ${validEmoji} for task: ${task.title}`);
@@ -61,7 +67,7 @@ export async function generateTaskEmoji(task) {
 }
 
 /**
- * Génère une clé de cache basée sur le contenu significatif de la tâche
+ * Generates a cache key based on significant task content
  */
 function generateCacheKey(task) {
 	const content = [
@@ -71,23 +77,23 @@ function generateCacheKey(task) {
 		task.status || ''
 	].join('|').toLowerCase().trim();
 	
-	// Hash simple pour éviter les clés trop longues
+	// Simple hash to avoid overly long keys
 	return btoa(content).slice(0, 32);
 }
 
 /**
- * Construit le contexte de la tâche pour l'IA
+ * Builds task context for AI
  */
 function buildTaskContext(task) {
 	const context = {
-		title: task.title || 'Sans titre',
+		title: task.title || 'Untitled',
 		description: task.description || '',
 		details: task.details || '',
 		priority: task.priority || 'medium',
 		status: task.status || 'pending'
 	};
 	
-	// Ajouter des mots-clés significatifs
+	// Add significant keywords
 	const keywords = extractKeywords(context);
 	context.keywords = keywords;
 	
@@ -95,12 +101,12 @@ function buildTaskContext(task) {
 }
 
 /**
- * Extrait des mots-clés significatifs du contexte de la tâche
+ * Extracts significant keywords from task context
  */
 function extractKeywords(context) {
 	const text = [context.title, context.description, context.details].join(' ').toLowerCase();
 	
-	// Mots-clés techniques communs
+	// Common technical keywords
 	const technicalKeywords = [
 		'api', 'database', 'frontend', 'backend', 'ui', 'ux', 'design',
 		'test', 'testing', 'debug', 'bug', 'fix', 'security', 'auth',
@@ -112,48 +118,48 @@ function extractKeywords(context) {
 }
 
 /**
- * Construit le prompt optimisé pour la génération d'emoji
+ * Builds optimized prompt for emoji generation
  */
 function buildEmojiPrompt(taskContext) {
-	return `Tu es un expert en productivité et gestion de tâches. Ton rôle est de choisir l'emoji PARFAIT pour représenter visuellement une tâche dans un système de gestion de projet.
+	return `You are an expert in productivity and task management. Your role is to choose the PERFECT emoji to visually represent a task in a project management system.
 
-TÂCHE À ANALYSER:
-- Titre: "${taskContext.title}"
+TASK TO ANALYZE:
+- Title: "${taskContext.title}"
 - Description: "${taskContext.description}"
-- Détails: "${taskContext.details}"
-- Priorité: ${taskContext.priority}
-- Statut: ${taskContext.status}
-- Mots-clés détectés: ${taskContext.keywords.join(', ')}
+- Details: "${taskContext.details}"
+- Priority: ${taskContext.priority}
+- Status: ${taskContext.status}
+- Detected keywords: ${taskContext.keywords.join(', ')}
 
 INSTRUCTIONS:
-1. Analyse le CONTENU et le CONTEXTE de la tâche
-2. Choisis UN SEUL emoji qui représente le mieux cette tâche
-3. Priorise la CLARTÉ et la RECONNAISSANCE instantanée
-4. Pense à l'utilisateur qui doit rapidement identifier le type de tâche
+1. Analyze the CONTENT and CONTEXT of the task
+2. Choose ONE emoji that best represents this task
+3. Prioritize CLARITY and instant RECOGNITION
+4. Think about the user who needs to quickly identify the task type
 
-EXEMPLES DE BONNES PRATIQUES:
-- 🛠️ pour implémentation/développement
-- 🐛 pour correction de bugs
-- 🎨 pour design/UI
-- 📚 pour documentation
-- 🔐 pour sécurité
-- ⚡ pour performance
-- 🧪 pour tests
-- 🚀 pour déploiement
-- 📱 pour mobile
-- 🌐 pour web/frontend
-- ⚙️ pour backend/config
+GOOD PRACTICE EXAMPLES:
+- 🛠️ for implementation/development
+- 🐛 for bug fixes
+- 🎨 for design/UI
+- 📚 for documentation
+- 🔐 for security
+- ⚡ for performance
+- 🧪 for tests
+- 🚀 for deployment
+- 📱 for mobile
+- 🌐 for web/frontend
+- ⚙️ for backend/config
 
-RÉPONDS UNIQUEMENT AVEC L'EMOJI CHOISI, RIEN D'AUTRE.`;
+RESPOND ONLY WITH THE CHOSEN EMOJI, NOTHING ELSE.`;
 }
 
 /**
- * Extrait l'emoji de la réponse de l'IA
+ * Extracts emoji from AI response
  */
 function extractEmojiFromResponse(responseText) {
 	if (!responseText) return null;
 	
-	// Regex pour extraire le premier emoji trouvé
+	// Regex to extract first emoji found
 	const emojiRegex = /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu;
 	const matches = responseText.match(emojiRegex);
 	
@@ -161,7 +167,7 @@ function extractEmojiFromResponse(responseText) {
 		return matches[0];
 	}
 	
-	// Fallback: chercher des emojis communs en texte
+	// Fallback: search for common emojis in text
 	const textEmojis = {
 		'🛠️': ['tool', 'build', 'implement', 'develop'],
 		'🐛': ['bug', 'fix', 'error', 'debug'],
@@ -184,36 +190,36 @@ function extractEmojiFromResponse(responseText) {
 }
 
 /**
- * Valide l'emoji et retourne un emoji par défaut si invalide
+ * Validates emoji and returns default emoji if invalid
  */
 function validateEmoji(emoji) {
 	if (!emoji || typeof emoji !== 'string' || emoji.length === 0) {
-		return '📋'; // Emoji par défaut
+		return '📋'; // Default emoji
 	}
 	
-	// Vérifier que c'est bien un emoji Unicode
+	// Check if it's a valid Unicode emoji
 	const emojiRegex = /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu;
 	
 	if (emojiRegex.test(emoji)) {
 		return emoji;
 	}
 	
-	return '📋'; // Emoji par défaut si validation échoue
+	return '📋'; // Default emoji if validation fails
 }
 
 /**
- * Retourne un emoji par défaut basé sur des heuristiques simples
+ * Returns a default emoji based on simple heuristics
  */
 function getDefaultEmoji(task) {
 	const title = (task.title || '').toLowerCase();
 	const description = (task.description || '').toLowerCase();
 	const fullText = `${title} ${description}`;
 	
-	// Heuristiques simples pour fallback
+	// Simple heuristics for fallback
 	if (fullText.includes('bug') || fullText.includes('fix') || fullText.includes('error')) {
 		return '🐛';
 	}
-	if (fullText.includes('design') || fullText.includes('ui') || fullText.includes('style')) {
+	if (fullText.includes('design') || fullText.includes('ui') || fullText.includes('style') || fullText.includes('icon')) {
 		return '🎨';
 	}
 	if (fullText.includes('test') || fullText.includes('testing')) {
@@ -237,13 +243,22 @@ function getDefaultEmoji(task) {
 	if (fullText.includes('frontend') || fullText.includes('web')) {
 		return '🌐';
 	}
+	if (fullText.includes('config') || fullText.includes('configuration')) {
+		return '⚙️';
+	}
+	if (fullText.includes('monitor') || fullText.includes('monitoring') || fullText.includes('analytics')) {
+		return '📊';
+	}
+	if (fullText.includes('package') || fullText.includes('implement') || fullText.includes('create')) {
+		return '📦';
+	}
 	
-	// Par défaut
+	// Default
 	return '📋';
 }
 
 /**
- * Efface le cache (utile pour les tests ou le redémarrage)
+ * Clears cache (useful for tests or restart)
  */
 export function clearEmojiCache() {
 	emojiCache.clear();
@@ -251,7 +266,7 @@ export function clearEmojiCache() {
 }
 
 /**
- * Retourne les statistiques du cache
+ * Returns cache statistics
  */
 export function getEmojiCacheStats() {
 	return {

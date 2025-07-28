@@ -707,14 +707,6 @@ async function buildNotionProperties(task, tag, now = new Date()) {
 	// Date property logic
 	const dateProps = buildDateProperties(task, now);
 
-	// Générer l'emoji avec l'IA (avec fallback en cas d'erreur)
-	let taskEmoji = '📋'; // Emoji par défaut
-	try {
-		taskEmoji = await generateTaskEmoji(task);
-	} catch (error) {
-		log('warn', `[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}`);
-	}
-
 	return {
 		title: { title: splitRichTextByWord(task.title || '') },
 		description: { rich_text: splitRichTextByWord(task.description || '') },
@@ -726,10 +718,20 @@ async function buildNotionProperties(task, tag, now = new Date()) {
 		status: task.status ? { status: { name: task.status } } : undefined,
 		complexity:
 			task.complexity !== undefined ? { number: task.complexity } : undefined,
-		...dateProps,
-		// Ajouter l'emoji généré par l'IA
-		icon: { emoji: taskEmoji }
+		...dateProps
 	};
+}
+
+// Generate emoji for task icon (separate from properties)
+async function generateTaskIcon(task, projectRoot = process.cwd()) {
+	let taskEmoji = '📋'; // Default emoji
+	try {
+		// Use Claude Code via TaskMaster if available
+		taskEmoji = await generateTaskEmoji(task, projectRoot, null);
+	} catch (error) {
+		log('warn', `[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}`);
+	}
+	return { type: 'emoji', emoji: taskEmoji };
 }
 
 /**
@@ -872,7 +874,8 @@ async function addTaskToNotion(
 	mapping,
 	meta,
 	mappingFile,
-	options = {}
+	options = {},
+	projectRoot = process.cwd()
 ) {
 	// Default behavior: use hierarchy if available and not explicitly disabled
 	const shouldUseHierarchy =
@@ -920,11 +923,15 @@ async function addTaskToNotion(
 		}
 	}
 
-	// Create page with all properties (including relations)
+	// Generate task icon for page
+	const icon = await generateTaskIcon(task, projectRoot);
+
+	// Create page with all properties (including relations) and icon
 	const pageResponse = await executeWithRetry(() =>
 		notion.pages.create({
 			parent: { database_id: NOTION_DATABASE_ID },
-			properties
+			properties,
+			icon
 		})
 	);
 
@@ -943,14 +950,16 @@ async function addTaskToNotion(
 }
 
 // Update a task in Notion (with retry)
-async function updateTaskInNotion(task, tag, mapping, meta, mappingFile) {
+async function updateTaskInNotion(task, tag, mapping, meta, mappingFile, projectRoot = process.cwd()) {
 	const notionId = getNotionPageId(mapping, tag, task.id);
 	if (!notionId) throw new Error('Notion page id not found for update');
 	const properties = await buildNotionProperties(task, tag);
+	const icon = await generateTaskIcon(task, projectRoot);
 	await executeWithRetry(() =>
 		notion.pages.update({
 			page_id: notionId,
-			properties
+			properties,
+			icon
 		})
 	);
 	saveNotionSyncMapping(mapping, meta, mappingFile);
@@ -1012,7 +1021,8 @@ async function updateNotionComplexityForCurrentTag(projectRoot) {
 						tag,
 						mapping,
 						meta,
-						mappingFile
+						mappingFile,
+						projectRoot
 					);
 					updatedCount++;
 				} catch (e) {
@@ -1036,7 +1046,8 @@ async function updateNotionComplexityForCurrentTag(projectRoot) {
 									tag,
 									mapping,
 									meta,
-									mappingFile
+									mappingFile,
+									projectRoot
 								);
 								updatedCount++;
 							} catch (e) {
@@ -1111,7 +1122,7 @@ async function ensureAllTasksHaveNotionMapping(
 				try {
 					await addTaskToNotion(task, tag, mapping, meta, mappingFile, {
 						preserveFlattenTasks: !useHierarchicalSync
-					});
+					}, projectRoot);
 					// Reload mapping after add
 					({ mapping } = loadNotionSyncMapping(mappingFile));
 					changed = true;
@@ -1325,7 +1336,8 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 					mappingFile,
 					{
 						preserveFlattenTasks: !useHierarchicalSync
-					}
+					},
+					projectRoot
 				);
 				({ mapping } = loadNotionSyncMapping(mappingFile));
 			} else if (change.type === 'updated') {
@@ -1335,7 +1347,8 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 					change.tag,
 					mapping,
 					meta,
-					mappingFile
+					mappingFile,
+					projectRoot
 				);
 			} else if (change.type === 'deleted') {
 				logger.info(`Deleting task: [${change.tag}] ${change.id}`);
@@ -1365,7 +1378,8 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 						newTag,
 						mapping,
 						meta,
-						mappingFile
+						mappingFile,
+						projectRoot
 					);
 				} else {
 					await addTaskToNotion(
@@ -1376,7 +1390,8 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 						mappingFile,
 						{
 							preserveFlattenTasks: !useHierarchicalSync
-						}
+						},
+						projectRoot
 					);
 					({ mapping } = loadNotionSyncMapping(mappingFile));
 				}
@@ -2382,7 +2397,7 @@ async function repairNotionDB(projectRoot, options = {}) {
 						logger.info(`Syncing task ${id}: ${task.title}`);
 						await addTaskToNotion(task, tag, mapping, meta, mappingFile, {
 							preserveFlattenTasks: !useHierarchicalSync
-						});
+						}, projectRoot);
 						// Reload mapping after each add
 						({ mapping, meta } = loadNotionSyncMapping(mappingFile));
 						tasksAdded++;
@@ -2740,5 +2755,6 @@ export {
 	initNotion,
 	getNotionClient,
 	getIsNotionEnabled,
-	fetchAllNotionPages
+	fetchAllNotionPages,
+	generateTaskIcon
 };
