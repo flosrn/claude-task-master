@@ -18,11 +18,15 @@ const emojiCache = new Map();
  * @param {string} session - Session ID (optional, for TaskMaster)
  * @returns {Promise<string>} The emoji chosen by AI or default emoji
  */
-export async function generateTaskEmoji(task, projectRoot = process.cwd(), session = null) {
+export async function generateTaskEmoji(
+	task,
+	projectRoot = process.cwd(),
+	session = null
+) {
 	try {
 		// Create a cache key based on task content
 		const cacheKey = generateCacheKey(task);
-		
+
 		// Check cache first
 		if (emojiCache.has(cacheKey)) {
 			log('debug', `[EMOJI] Cache hit for task: ${task.title}`);
@@ -31,12 +35,12 @@ export async function generateTaskEmoji(task, projectRoot = process.cwd(), sessi
 
 		// Prepare task context for AI
 		const taskContext = buildTaskContext(task);
-		
+
 		// Optimized prompt for AI
 		const prompt = buildEmojiPrompt(taskContext);
-		
+
 		log('debug', `[EMOJI] Requesting AI emoji for: ${task.title}`);
-		
+
 		// AI call with timeout and fallback - uses TaskMaster/Claude Code
 		const response = await generateTextService({
 			prompt,
@@ -46,22 +50,24 @@ export async function generateTaskEmoji(task, projectRoot = process.cwd(), sessi
 			commandName: 'emoji-generation',
 			outputType: session ? 'mcp' : 'cli' // MCP if session provided, otherwise CLI
 		});
-		
+
 		// Extract emoji from response (response.mainResult for unified system)
 		const responseText = response.mainResult || response.text || response;
 		const emoji = extractEmojiFromResponse(responseText);
-		
+
 		// Validate emoji
 		const validEmoji = validateEmoji(emoji);
-		
+
 		// Cache to avoid future calls
 		emojiCache.set(cacheKey, validEmoji);
-		
+
 		log('debug', `[EMOJI] Generated ${validEmoji} for task: ${task.title}`);
 		return validEmoji;
-		
 	} catch (error) {
-		log('warn', `[EMOJI] Failed to generate emoji for task ${task.title}: ${error.message}`);
+		log(
+			'warn',
+			`[EMOJI] Failed to generate emoji for task ${task.title}: ${error.message}`
+		);
 		return getDefaultEmoji(task);
 	}
 }
@@ -75,8 +81,11 @@ function generateCacheKey(task) {
 		task.description || '',
 		task.priority || '',
 		task.status || ''
-	].join('|').toLowerCase().trim();
-	
+	]
+		.join('|')
+		.toLowerCase()
+		.trim();
+
 	// Simple hash to avoid overly long keys
 	return btoa(content).slice(0, 32);
 }
@@ -92,11 +101,11 @@ function buildTaskContext(task) {
 		priority: task.priority || 'medium',
 		status: task.status || 'pending'
 	};
-	
+
 	// Add significant keywords
 	const keywords = extractKeywords(context);
 	context.keywords = keywords;
-	
+
 	return context;
 }
 
@@ -104,17 +113,40 @@ function buildTaskContext(task) {
  * Extracts significant keywords from task context
  */
 function extractKeywords(context) {
-	const text = [context.title, context.description, context.details].join(' ').toLowerCase();
-	
+	const text = [context.title, context.description, context.details]
+		.join(' ')
+		.toLowerCase();
+
 	// Common technical keywords
 	const technicalKeywords = [
-		'api', 'database', 'frontend', 'backend', 'ui', 'ux', 'design',
-		'test', 'testing', 'debug', 'bug', 'fix', 'security', 'auth',
-		'deploy', 'performance', 'optimize', 'refactor', 'implement',
-		'create', 'build', 'setup', 'config', 'documentation', 'docs'
+		'api',
+		'database',
+		'frontend',
+		'backend',
+		'ui',
+		'ux',
+		'design',
+		'test',
+		'testing',
+		'debug',
+		'bug',
+		'fix',
+		'security',
+		'auth',
+		'deploy',
+		'performance',
+		'optimize',
+		'refactor',
+		'implement',
+		'create',
+		'build',
+		'setup',
+		'config',
+		'documentation',
+		'docs'
 	];
-	
-	return technicalKeywords.filter(keyword => text.includes(keyword));
+
+	return technicalKeywords.filter((keyword) => text.includes(keyword));
 }
 
 /**
@@ -158,15 +190,16 @@ RESPOND ONLY WITH THE CHOSEN EMOJI, NOTHING ELSE.`;
  */
 function extractEmojiFromResponse(responseText) {
 	if (!responseText) return null;
-	
+
 	// Regex to extract first emoji found
-	const emojiRegex = /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu;
+	const emojiRegex =
+		/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu;
 	const matches = responseText.match(emojiRegex);
-	
+
 	if (matches && matches.length > 0) {
 		return matches[0];
 	}
-	
+
 	// Fallback: search for common emojis in text
 	const textEmojis = {
 		'🛠️': ['tool', 'build', 'implement', 'develop'],
@@ -178,14 +211,14 @@ function extractEmojiFromResponse(responseText) {
 		'🧪': ['test', 'testing', 'spec'],
 		'🚀': ['deploy', 'launch', 'release']
 	};
-	
+
 	const lowerResponse = responseText.toLowerCase();
 	for (const [emoji, keywords] of Object.entries(textEmojis)) {
-		if (keywords.some(keyword => lowerResponse.includes(keyword))) {
+		if (keywords.some((keyword) => lowerResponse.includes(keyword))) {
 			return emoji;
 		}
 	}
-	
+
 	return null;
 }
 
@@ -196,14 +229,15 @@ function validateEmoji(emoji) {
 	if (!emoji || typeof emoji !== 'string' || emoji.length === 0) {
 		return '📋'; // Default emoji
 	}
-	
+
 	// Check if it's a valid Unicode emoji
-	const emojiRegex = /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu;
-	
+	const emojiRegex =
+		/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu;
+
 	if (emojiRegex.test(emoji)) {
 		return emoji;
 	}
-	
+
 	return '📋'; // Default emoji if validation fails
 }
 
@@ -214,12 +248,21 @@ function getDefaultEmoji(task) {
 	const title = (task.title || '').toLowerCase();
 	const description = (task.description || '').toLowerCase();
 	const fullText = `${title} ${description}`;
-	
+
 	// Simple heuristics for fallback
-	if (fullText.includes('bug') || fullText.includes('fix') || fullText.includes('error')) {
+	if (
+		fullText.includes('bug') ||
+		fullText.includes('fix') ||
+		fullText.includes('error')
+	) {
 		return '🐛';
 	}
-	if (fullText.includes('design') || fullText.includes('ui') || fullText.includes('style') || fullText.includes('icon')) {
+	if (
+		fullText.includes('design') ||
+		fullText.includes('ui') ||
+		fullText.includes('style') ||
+		fullText.includes('icon')
+	) {
 		return '🎨';
 	}
 	if (fullText.includes('test') || fullText.includes('testing')) {
@@ -246,13 +289,21 @@ function getDefaultEmoji(task) {
 	if (fullText.includes('config') || fullText.includes('configuration')) {
 		return '⚙️';
 	}
-	if (fullText.includes('monitor') || fullText.includes('monitoring') || fullText.includes('analytics')) {
+	if (
+		fullText.includes('monitor') ||
+		fullText.includes('monitoring') ||
+		fullText.includes('analytics')
+	) {
 		return '📊';
 	}
-	if (fullText.includes('package') || fullText.includes('implement') || fullText.includes('create')) {
+	if (
+		fullText.includes('package') ||
+		fullText.includes('implement') ||
+		fullText.includes('create')
+	) {
 		return '📦';
 	}
-	
+
 	// Default
 	return '📋';
 }

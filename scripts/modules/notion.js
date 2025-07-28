@@ -729,7 +729,10 @@ async function generateTaskIcon(task, projectRoot = process.cwd()) {
 		// Use Claude Code via TaskMaster if available
 		taskEmoji = await generateTaskEmoji(task, projectRoot, null);
 	} catch (error) {
-		log('warn', `[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}`);
+		log(
+			'warn',
+			`[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}`
+		);
 	}
 	return { type: 'emoji', emoji: taskEmoji };
 }
@@ -950,7 +953,14 @@ async function addTaskToNotion(
 }
 
 // Update a task in Notion (with retry)
-async function updateTaskInNotion(task, tag, mapping, meta, mappingFile, projectRoot = process.cwd()) {
+async function updateTaskInNotion(
+	task,
+	tag,
+	mapping,
+	meta,
+	mappingFile,
+	projectRoot = process.cwd()
+) {
 	const notionId = getNotionPageId(mapping, tag, task.id);
 	if (!notionId) throw new Error('Notion page id not found for update');
 	const properties = await buildNotionProperties(task, tag);
@@ -1120,9 +1130,17 @@ async function ensureAllTasksHaveNotionMapping(
 				if (debug)
 					logger.debug(`Creating missing Notion page for [${tag}] ${id}`);
 				try {
-					await addTaskToNotion(task, tag, mapping, meta, mappingFile, {
-						preserveFlattenTasks: !useHierarchicalSync
-					}, projectRoot);
+					await addTaskToNotion(
+						task,
+						tag,
+						mapping,
+						meta,
+						mappingFile,
+						{
+							preserveFlattenTasks: !useHierarchicalSync
+						},
+						projectRoot
+					);
 					// Reload mapping after add
 					({ mapping } = loadNotionSyncMapping(mappingFile));
 					changed = true;
@@ -2395,9 +2413,17 @@ async function repairNotionDB(projectRoot, options = {}) {
 				for (const { id, task } of sortedMissingTasks) {
 					try {
 						logger.info(`Syncing task ${id}: ${task.title}`);
-						await addTaskToNotion(task, tag, mapping, meta, mappingFile, {
-							preserveFlattenTasks: !useHierarchicalSync
-						}, projectRoot);
+						await addTaskToNotion(
+							task,
+							tag,
+							mapping,
+							meta,
+							mappingFile,
+							{
+								preserveFlattenTasks: !useHierarchicalSync
+							},
+							projectRoot
+						);
 						// Reload mapping after each add
 						({ mapping, meta } = loadNotionSyncMapping(mappingFile));
 						tasksAdded++;
