@@ -172,14 +172,14 @@ describe('clearSubtasks', () => {
 		);
 	});
 
-	test('should clear subtasks from multiple tasks when given comma-separated IDs', () => {
+	test('should clear subtasks from multiple tasks when given comma-separated IDs', async () => {
 		// Arrange
 		const taskIds = '3,4';
 		const tasksPath = 'tasks/tasks.json';
 		const context = { tag: 'master' };
 
 		// Act
-		clearSubtasks(tasksPath, taskIds, context);
+		await clearSubtasks(tasksPath, taskIds, context);
 
 		// Assert
 		expect(readJSON).toHaveBeenCalledWith(tasksPath, undefined, 'master');
@@ -200,14 +200,14 @@ describe('clearSubtasks', () => {
 		);
 	});
 
-	test('should handle tasks with no subtasks', () => {
+	test('should handle tasks with no subtasks', async () => {
 		// Arrange
 		const taskId = '1'; // Task 1 already has no subtasks
 		const tasksPath = 'tasks/tasks.json';
 		const context = { tag: 'master' };
 
 		// Act
-		clearSubtasks(tasksPath, taskId, context);
+		await clearSubtasks(tasksPath, taskId, context);
 
 		// Assert
 		expect(readJSON).toHaveBeenCalledWith(tasksPath, undefined, 'master');
@@ -216,14 +216,14 @@ describe('clearSubtasks', () => {
 		expect(generateTaskFiles).not.toHaveBeenCalled();
 	});
 
-	test('should handle non-existent task IDs gracefully', () => {
+	test('should handle non-existent task IDs gracefully', async () => {
 		// Arrange
 		const taskId = '99'; // Non-existent task
 		const tasksPath = 'tasks/tasks.json';
 		const context = { tag: 'master' };
 
 		// Act
-		clearSubtasks(tasksPath, taskId, context);
+		await clearSubtasks(tasksPath, taskId, context);
 
 		// Assert
 		expect(readJSON).toHaveBeenCalledWith(tasksPath, undefined, 'master');
@@ -233,14 +233,14 @@ describe('clearSubtasks', () => {
 		expect(generateTaskFiles).not.toHaveBeenCalled();
 	});
 
-	test('should handle multiple task IDs including both valid and non-existent IDs', () => {
+	test('should handle multiple task IDs including both valid and non-existent IDs', async () => {
 		// Arrange
 		const taskIds = '3,99'; // Mix of valid and invalid IDs
 		const tasksPath = 'tasks/tasks.json';
 		const context = { tag: 'master' };
 
 		// Act
-		clearSubtasks(tasksPath, taskIds, context);
+		await clearSubtasks(tasksPath, taskIds, context);
 
 		// Assert
 		expect(readJSON).toHaveBeenCalledWith(tasksPath, undefined, 'master');
@@ -266,31 +266,31 @@ describe('clearSubtasks', () => {
 		);
 	});
 
-	test('should handle file read errors', () => {
+	test('should handle file read errors', async () => {
 		// Arrange
 		readJSON.mockImplementation(() => {
 			throw new Error('File read failed');
 		});
 
 		// Act & Assert
-		expect(() => {
-			clearSubtasks('tasks/tasks.json', '3', { tag: 'master' });
-		}).toThrow('File read failed');
+		await expect(async () => {
+			await clearSubtasks('tasks/tasks.json', '3', { tag: 'master' });
+		}).rejects.toThrow('File read failed');
 	});
 
-	test('should handle invalid tasks data', () => {
+	test('should handle invalid tasks data', async () => {
 		// Arrange
 		readJSON.mockReturnValue(null);
 
 		// Act & Assert
-		expect(() => {
-			clearSubtasks('tasks/tasks.json', '3', { tag: 'master' });
-		}).toThrow('process.exit called');
+		await expect(async () => {
+			await clearSubtasks('tasks/tasks.json', '3', { tag: 'master' });
+		}).rejects.toThrow('process.exit called');
 
 		expect(log).toHaveBeenCalledWith('error', 'No valid tasks found.');
 	});
 
-	test('should handle file write errors', () => {
+	test('should handle file write errors', async () => {
 		// Arrange
 		// Ensure task 3 has subtasks to clear so writeJSON gets called
 		readJSON.mockReturnValue({
@@ -312,8 +312,8 @@ describe('clearSubtasks', () => {
 		});
 
 		// Act & Assert
-		expect(() => {
-			clearSubtasks('tasks/tasks.json', '3', { tag: 'master' });
-		}).toThrow('File write failed');
+		await expect(async () => {
+			await clearSubtasks('tasks/tasks.json', '3', { tag: 'master' });
+		}).rejects.toThrow('File write failed');
 	});
 });
