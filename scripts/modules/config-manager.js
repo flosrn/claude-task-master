@@ -61,6 +61,12 @@ const DEFAULTS = {
 			modelId: 'claude-3-5-sonnet',
 			maxTokens: 8192, // Default parameters if fallback IS configured
 			temperature: 0.2
+		},
+		emoji: {
+			provider: 'google',
+			modelId: 'gemini-2.5-flash-lite',
+			maxTokens: 1000,
+			temperature: 0.3
 		}
 	},
 	global: {
@@ -146,7 +152,12 @@ function _loadAndValidateConfig(explicitRoot = null) {
 						parsedConfig?.models?.fallback?.provider &&
 						parsedConfig?.models?.fallback?.modelId
 							? { ...defaults.models.fallback, ...parsedConfig.models.fallback }
-							: { ...defaults.models.fallback }
+							: { ...defaults.models.fallback },
+					emoji:
+						parsedConfig?.models?.emoji?.provider &&
+						parsedConfig?.models?.emoji?.modelId
+							? { ...defaults.models.emoji, ...parsedConfig.models.emoji }
+							: { ...defaults.models.emoji }
 				},
 				global: { ...defaults.global, ...parsedConfig?.global },
 				claudeCode: { ...defaults.claudeCode, ...parsedConfig?.claudeCode }
@@ -459,6 +470,24 @@ function getFallbackMaxTokens(explicitRoot = null) {
 function getFallbackTemperature(explicitRoot = null) {
 	// Directly return value from config
 	return getModelConfigForRole('fallback', explicitRoot).temperature;
+}
+
+function getEmojiProvider(explicitRoot = null) {
+	return getModelConfigForRole('emoji', explicitRoot).provider;
+}
+
+function getEmojiModelId(explicitRoot = null) {
+	return getModelConfigForRole('emoji', explicitRoot).modelId;
+}
+
+function getEmojiMaxTokens(explicitRoot = null) {
+	// Directly return value from config
+	return getModelConfigForRole('emoji', explicitRoot).maxTokens;
+}
+
+function getEmojiTemperature(explicitRoot = null) {
+	// Directly return value from config
+	return getModelConfigForRole('emoji', explicitRoot).temperature;
 }
 
 // --- Global Settings Getters ---
@@ -971,6 +1000,10 @@ export {
 	getFallbackModelId,
 	getFallbackMaxTokens,
 	getFallbackTemperature,
+	getEmojiProvider,
+	getEmojiModelId,
+	getEmojiMaxTokens,
+	getEmojiTemperature,
 	getBaseUrlForRole,
 	// Global setting getters (No env var overrides)
 	getLogLevel,

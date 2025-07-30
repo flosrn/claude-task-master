@@ -20,13 +20,15 @@ const logger = {
  * @param {string} tag - The current tag
  * @param {Object} mapping - The TaskMaster ID -> Notion ID mapping
  * @param {boolean} useDependencyRelations - If true, use relations for dependencies
+ * @param {string} dependencyRelationName - Name of the dependency relation property
  * @returns {Object} The Notion relation properties
  */
 export function buildHierarchicalRelations(
 	task,
 	tag,
 	mapping,
-	useDependencyRelations = false
+	useDependencyRelations = false,
+	dependencyRelationName = 'Dependencies Tasks'
 ) {
 	const relations = {};
 
@@ -49,7 +51,7 @@ export function buildHierarchicalRelations(
 				.filter((notionId) => notionId);
 
 			if (dependencyIds.length > 0) {
-				relations['Dependencies Tasks'] = {
+				relations[dependencyRelationName] = {
 					relation: dependencyIds.map((id) => ({ id }))
 				};
 			}
@@ -75,7 +77,7 @@ export async function updateHierarchicalRelations(
 	notion,
 	options = {}
 ) {
-	const { debug = false, useDependencyRelations = false } = options;
+	const { debug = false, useDependencyRelations = false, dependencyRelationName = 'Dependencies Tasks' } = options;
 	let updatedCount = 0;
 	let errors = [];
 
@@ -113,7 +115,8 @@ export async function updateHierarchicalRelations(
 				task,
 				taskTag,
 				mapping,
-				useDependencyRelations
+				useDependencyRelations,
+				dependencyRelationName
 			);
 			if (Object.keys(relations).length === 0) {
 				return null; // No relations to update
@@ -212,9 +215,10 @@ export function checkRelationProperties(database) {
  * Useful for bidirectional synchronization
  * @param {Array} notionPages - Pages retrieved from Notion
  * @param {string} tag - The current tag
+ * @param {string} dependencyRelationName - Name of the dependency relation property
  * @returns {Object} Reconstructed hierarchical structure
  */
-export function reconstructHierarchyFromNotion(notionPages, tag) {
+export function reconstructHierarchyFromNotion(notionPages, tag, dependencyRelationName = 'Dependencies Tasks') {
 	const hierarchy = {};
 	const tasksByNotionId = new Map();
 	const tasksByTaskMasterId = new Map();
@@ -230,7 +234,7 @@ export function reconstructHierarchyFromNotion(notionPages, tag) {
 			title: page.properties.title?.title?.[0]?.plain_text || '',
 			parentRelations: page.properties['Parent item']?.relation || [],
 			subItemRelations: page.properties['Sub-item']?.relation || [],
-			dependencies: page.properties['Dependencies Tasks']?.relation || []
+			dependencies: page.properties[dependencyRelationName]?.relation || []
 		};
 
 		tasksByNotionId.set(page.id, task);

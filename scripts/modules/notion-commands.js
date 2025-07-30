@@ -289,6 +289,12 @@ export async function repairNotionDBCommand(options = {}) {
 				}
 			}
 
+			if (result.propertiesUpdated > 0) {
+				console.log(
+					`\n${chalk.blue('Properties Updated:')} ${result.propertiesUpdated} tasks had their properties refreshed (including dependencies)`
+				);
+			}
+
 			if (result.pagesWithoutTaskId > 0) {
 				console.log(
 					`\n${chalk.yellow('Warning:')} ${result.pagesWithoutTaskId} pages found without taskid property`
@@ -307,7 +313,8 @@ export async function repairNotionDBCommand(options = {}) {
 					(result.duplicatesRemoved || 0) > 0 ||
 					(result.tasksAdded || 0) > 0 ||
 					(result.extraTasksRemoved || 0) > 0 ||
-					(result.invalidMappingsRemoved || 0) > 0;
+					(result.invalidMappingsRemoved || 0) > 0 ||
+					(result.propertiesUpdated || 0) > 0;
 
 				if (hasChanges) {
 					console.log(

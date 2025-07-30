@@ -41,10 +41,10 @@ export async function generateTaskEmoji(
 
 		log('debug', `[EMOJI] Requesting AI emoji for: ${task.title}`);
 
-		// AI call with timeout and fallback - uses TaskMaster/Claude Code
+		// AI call with timeout and fallback - uses fast emoji model
 		const response = await generateTextService({
 			prompt,
-			role: 'main', // Use configured main model
+			role: 'emoji', // Use fast emoji model (falls back to main if not configured)
 			session: session,
 			projectRoot: projectRoot,
 			commandName: 'emoji-generation',

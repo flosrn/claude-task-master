@@ -87,3 +87,6 @@ dev-debug.log
 *.njsproj
 *.sln
 *.sw?
+
+# Testing directories
+test-notion-sync/

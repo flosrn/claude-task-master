@@ -28,7 +28,7 @@ export function updateConfigMaxTokens(configPath) {
 		const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
 		// Update each role's maxTokens if the model exists in supported-models.json
-		const roles = ['main', 'research', 'fallback'];
+		const roles = ['main', 'research', 'fallback', 'emoji'];
 
 		for (const role of roles) {
 			if (config.models && config.models[role]) {

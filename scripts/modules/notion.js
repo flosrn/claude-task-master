@@ -889,6 +889,12 @@ async function addTaskToNotion(
 	const { includeRelations = shouldUseHierarchy } = options;
 	const properties = await buildNotionProperties(task, tag);
 
+	// Add dependencies as rich_text if no relation property is available
+	if (!hierarchyCapabilities?.hasDependencyRelation && task.dependencies?.length > 0) {
+		const relationProps = buildNotionRelationProperties(task, tag, mapping);
+		Object.assign(properties, relationProps);
+	}
+
 	// Add hierarchical relations during creation (not after)
 	if (includeRelations && task._parentId) {
 		const parentNotionId = getNotionPageId(mapping, tag, task._parentId);
@@ -917,7 +923,8 @@ async function addTaskToNotion(
 			.filter((notionId) => notionId);
 
 		if (dependencyIds.length > 0) {
-			properties['Dependencies Tasks'] = {
+			const dependencyRelationName = hierarchyCapabilities?.dependencyRelationName || 'Dependencies Tasks';
+			properties[dependencyRelationName] = {
 				relation: dependencyIds.map((id) => ({ id }))
 			};
 			logger.debug(
@@ -964,6 +971,13 @@ async function updateTaskInNotion(
 	const notionId = getNotionPageId(mapping, tag, task.id);
 	if (!notionId) throw new Error('Notion page id not found for update');
 	const properties = await buildNotionProperties(task, tag);
+	
+	// Add dependencies as rich_text if no relation property is available
+	if (!hierarchyCapabilities?.hasDependencyRelation && task.dependencies?.length > 0) {
+		const relationProps = buildNotionRelationProperties(task, tag, mapping);
+		Object.assign(properties, relationProps);
+	}
+	
 	const icon = await generateTaskIcon(task, projectRoot);
 	await executeWithRetry(() =>
 		notion.pages.update({
@@ -1009,6 +1023,7 @@ async function updateNotionComplexityForCurrentTag(projectRoot) {
 		mapping,
 		meta,
 		mappingFile,
+		projectRoot,
 		debug
 	);
 	// --- Only update relations if mapping changed (i.e., new pages were added) ---
@@ -1118,6 +1133,7 @@ async function ensureAllTasksHaveNotionMapping(
 	mapping,
 	meta,
 	mappingFile,
+	projectRoot,
 	debug = false
 ) {
 	let changed = false;
@@ -1333,6 +1349,7 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 		mapping,
 		meta,
 		mappingFile,
+		projectRoot,
 		debug
 	);
 	// --- Only update relations if mapping changed (i.e., new pages were added) ---
@@ -2526,7 +2543,9 @@ async function repairNotionDB(projectRoot, options = {}) {
 							{
 								debug: false,
 								useDependencyRelations:
-									hierarchyCapabilities.hasDependencyRelations
+									hierarchyCapabilities.hasDependencyRelations,
+								dependencyRelationName:
+									hierarchyCapabilities.dependencyRelationName || 'Dependencies Tasks'
 							}
 						);
 					}
@@ -2548,8 +2567,56 @@ async function repairNotionDB(projectRoot, options = {}) {
 			}
 		}
 
-		// Phase 4: Remove extra tasks from Notion DB (TaskMaster is source of truth)
-		logger.info('Phase 4: Cleaning up extra tasks from Notion DB...');
+		// Phase 4: Update all task properties (including dependencies rich_text)
+		logger.info('Phase 4: Updating all task properties to ensure complete synchronization...');
+		
+		let propertiesUpdated = 0;
+		const taskUpdateErrors = [];
+		
+		for (const [taskId, task] of localTasks) {
+			const notionPageIds = pagesByTaskId.get(taskId);
+			if (notionPageIds && notionPageIds.length > 0) {
+				const notionPage = notionPageIds[0]; // Use the first (and should be only) page
+				
+				try {
+					if (!dryRun) {
+						// Build complete properties including dependencies
+						const properties = await buildNotionProperties(task, tag);
+						
+						// Add dependencies as rich_text if no relation property is available
+						if (!hierarchyCapabilities?.hasDependencyRelation && task.dependencies?.length > 0) {
+							const relationProps = buildNotionRelationProperties(task, tag, mapping);
+							Object.assign(properties, relationProps);
+						}
+						
+						// Update the page with all properties
+						await executeWithRetry(() =>
+							notion.pages.update({
+								page_id: notionPage.id,
+								properties
+							})
+						);
+						
+						propertiesUpdated++;
+						logger.debug(`✓ Updated properties for task ${taskId}`);
+					} else {
+						logger.info(`[DRY RUN] Would update properties for task ${taskId}`);
+						propertiesUpdated++;
+					}
+				} catch (error) {
+					logger.error(`✗ Failed to update properties for task ${taskId}:`, error.message);
+					taskUpdateErrors.push({ taskId, error: error.message });
+				}
+			}
+		}
+		
+		logger.info(`Updated properties for ${propertiesUpdated} tasks`);
+		if (taskUpdateErrors.length > 0) {
+			logger.warn(`Failed to update ${taskUpdateErrors.length} tasks`);
+		}
+
+		// Phase 5: Remove extra tasks from Notion DB (TaskMaster is source of truth)
+		logger.info('Phase 5: Cleaning up extra tasks from Notion DB...');
 
 		const extraTasks = [];
 		for (const taskId of notionTaskIds) {
@@ -2644,17 +2711,17 @@ async function repairNotionDB(projectRoot, options = {}) {
 			logger.info('No extra tasks found in Notion DB');
 		}
 
-		// Phase 5: Clean up sync mappings (if not dry run)
+		// Phase 6: Clean up sync mappings (if not dry run)
 		if (
 			!dryRun &&
 			(duplicatesRemoved > 0 || tasksAdded > 0 || extraTasksRemoved > 0)
 		) {
-			logger.info('Phase 5: Cleaning up sync mappings...');
+			logger.info('Phase 6: Cleaning up sync mappings...');
 			await cleanupNotionMapping(projectRoot, duplicates);
 		}
 
-		// Phase 6: Clean up invalid sync mappings
-		logger.info('Phase 6: Cleaning up invalid sync mappings...');
+		// Phase 7: Clean up invalid sync mappings
+		logger.info('Phase 7: Cleaning up invalid sync mappings...');
 		let invalidMappingsRemoved = 0;
 		let updatedNotionPages = null;
 
@@ -2739,13 +2806,15 @@ async function repairNotionDB(projectRoot, options = {}) {
 			extraTasksRemoved: dryRun ? 0 : extraTasksRemoved,
 			invalidMappingsFound: invalidMappingsRemoved,
 			invalidMappingsRemoved: dryRun ? 0 : invalidMappingsRemoved,
+			propertiesUpdated: dryRun ? 0 : propertiesUpdated,
+			taskUpdateErrors: taskUpdateErrors.length,
 			pagesWithoutTaskId: pagesWithoutTaskId.length,
 			duplicateDetails,
 			additionDetails: dryRun ? additionDetails : [],
 			preserveExtraTasks,
 			summary: dryRun
-				? `[DRY RUN] Would remove ${totalDuplicatePages} duplicates, sync ${missingTasks.length} TaskMaster tasks${totalExtraTasks > 0 && !preserveExtraTasks ? `, remove ${totalExtraTasks} extra tasks` : ''}${invalidMappingsRemoved > 0 ? `, and clean ${invalidMappingsRemoved} invalid sync mappings` : ''}`
-				: `Removed ${duplicatesRemoved} duplicates, synced ${tasksAdded} TaskMaster tasks${extraTasksRemoved > 0 ? `, removed ${extraTasksRemoved} extra tasks` : ''}${invalidMappingsRemoved > 0 ? `, cleaned ${invalidMappingsRemoved} invalid sync mappings` : ''}`
+				? `[DRY RUN] Would remove ${totalDuplicatePages} duplicates, sync ${missingTasks.length} TaskMaster tasks, update ${propertiesUpdated} task properties${totalExtraTasks > 0 && !preserveExtraTasks ? `, remove ${totalExtraTasks} extra tasks` : ''}${invalidMappingsRemoved > 0 ? `, and clean ${invalidMappingsRemoved} invalid sync mappings` : ''}`
+				: `Removed ${duplicatesRemoved} duplicates, synced ${tasksAdded} TaskMaster tasks, updated ${propertiesUpdated} task properties${extraTasksRemoved > 0 ? `, removed ${extraTasksRemoved} extra tasks` : ''}${invalidMappingsRemoved > 0 ? `, cleaned ${invalidMappingsRemoved} invalid sync mappings` : ''}`
 		};
 
 		logger.success(report.summary);

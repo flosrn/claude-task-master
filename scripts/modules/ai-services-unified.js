@@ -15,6 +15,8 @@ import {
 	getDebugFlag,
 	getFallbackModelId,
 	getFallbackProvider,
+	getEmojiModelId,
+	getEmojiProvider,
 	getMainModelId,
 	getMainProvider,
 	getOllamaBaseURL,
@@ -401,6 +403,8 @@ async function _unifiedServiceRunner(serviceType, params) {
 		sequence = ['research', 'fallback', 'main'];
 	} else if (initialRole === 'fallback') {
 		sequence = ['fallback', 'main', 'research'];
+	} else if (initialRole === 'emoji') {
+		sequence = ['emoji', 'main', 'fallback'];
 	} else {
 		log(
 			'warn',
@@ -435,6 +439,9 @@ async function _unifiedServiceRunner(serviceType, params) {
 			} else if (currentRole === 'fallback') {
 				providerName = getFallbackProvider(effectiveProjectRoot);
 				modelId = getFallbackModelId(effectiveProjectRoot);
+			} else if (currentRole === 'emoji') {
+				providerName = getEmojiProvider(effectiveProjectRoot);
+				modelId = getEmojiModelId(effectiveProjectRoot);
 			} else {
 				log(
 					'error',
