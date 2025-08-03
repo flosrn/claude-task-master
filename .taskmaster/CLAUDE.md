@@ -6,33 +6,43 @@
 
 ```bash
 # Project Setup
-task-master init                                    # Initialize Task Master in current project
-task-master parse-prd .taskmaster/docs/prd.txt      # Generate tasks from PRD document
-task-master models --setup                        # Configure AI models interactively
+task-master-notion init                                    # Initialize Task Master in current project
+task-master-notion parse-prd .taskmaster/docs/prd.txt      # Generate tasks from PRD document
+task-master-notion models --setup                        # Configure AI models interactively
 
 # Daily Development Workflow
-task-master list                                   # Show all tasks with status
-task-master next                                   # Get next available task to work on
-task-master show <id>                             # View detailed task information (e.g., task-master show 1.2)
-task-master set-status --id=<id> --status=done    # Mark task complete
+task-master-notion list                                   # Show all tasks with status
+task-master-notion next                                   # Get next available task to work on
+task-master-notion show <id>                             # View detailed task information (e.g., task-master-notion show 1.2)
+task-master-notion set-status --id=<id> --status=done    # Mark task complete
 
 # Task Management
-task-master add-task --prompt="description" --research        # Add new task with AI assistance
-task-master expand --id=<id> --research --force              # Break task into subtasks
-task-master update-task --id=<id> --prompt="changes"         # Update specific task
-task-master update --from=<id> --prompt="changes"            # Update multiple tasks from ID onwards
-task-master update-subtask --id=<id> --prompt="notes"        # Add implementation notes to subtask
+task-master-notion add-task --prompt="description" --research        # Add new task with AI assistance
+task-master-notion expand --id=<id> --research --force              # Break task into subtasks
+task-master-notion update-task --id=<id> --prompt="changes"         # Update specific task
+task-master-notion update --from=<id> --prompt="changes"            # Update multiple tasks from ID onwards
+task-master-notion update-subtask --id=<id> --prompt="notes"        # Add implementation notes to subtask
 
 # Analysis & Planning
-task-master analyze-complexity --research          # Analyze task complexity
-task-master complexity-report                      # View complexity analysis
-task-master expand --all --research               # Expand all eligible tasks
+task-master-notion analyze-complexity --research          # Analyze task complexity
+task-master-notion complexity-report                      # View complexity analysis
+task-master-notion expand --all --research               # Expand all eligible tasks
+task-master-notion scope-up --id=<id> --research         # Increase task complexity with AI
+task-master-notion scope-down --id=<id> --research       # Decrease task complexity with AI
 
 # Dependencies & Organization
-task-master add-dependency --id=<id> --depends-on=<id>       # Add task dependency
-task-master move --from=<id> --to=<id>                       # Reorganize task hierarchy
-task-master validate-dependencies                            # Check for dependency issues
-task-master generate                                         # Update task markdown files (usually auto-called)
+task-master-notion add-dependency --id=<id> --depends-on=<id>       # Add task dependency
+task-master-notion move --from=<id> --to=<id>                       # Reorganize task hierarchy
+task-master-notion validate-dependencies                            # Check for dependency issues
+task-master-notion generate                                         # Update task markdown files (usually auto-called)
+
+# Notion Integration & Synchronization
+task-master-notion validate-notion-sync                             # Validate Notion DB sync integrity
+task-master-notion repair-notion-db --preserve-extra-tasks         # Repair Notion DB intelligently
+task-master-notion reset-notion-db                                 # Completely reset Notion DB
+task-master-notion validate-notion-hierarchy-setup                 # Validate Notion DB hierarchy setup
+task-master-notion validate-notion-hierarchy                       # Validate TaskMaster ↔ Notion hierarchy
+task-master-notion repair-notion-hierarchy --force                 # Repair parent-child relationships
 ```
 
 ## Key Files & Project Structure
@@ -85,7 +95,7 @@ Task Master provides an MCP server that Claude Code can connect to. Configure in
   "mcpServers": {
     "task-master-ai": {
       "command": "npx",
-      "args": ["-y", "--package=task-master-ai", "task-master-ai"],
+      "args": ["-y", "--package=task-master-ai-notion", "task-master-ai-notion"],
       "env": {
         "ANTHROPIC_API_KEY": "your_key_here",
         "PERPLEXITY_API_KEY": "your_key_here",
@@ -107,25 +117,32 @@ Task Master provides an MCP server that Claude Code can connect to. Configure in
 ```javascript
 help; // = shows available taskmaster commands
 // Project setup
-initialize_project; // = task-master init
-parse_prd; // = task-master parse-prd
+initialize_project; // = task-master-notion init
+parse_prd; // = task-master-notion parse-prd
 
 // Daily workflow
-get_tasks; // = task-master list
-next_task; // = task-master next
-get_task; // = task-master show <id>
-set_task_status; // = task-master set-status
+get_tasks; // = task-master-notion list
+next_task; // = task-master-notion next
+get_task; // = task-master-notion show <id>
+set_task_status; // = task-master-notion set-status
 
 // Task management
-add_task; // = task-master add-task
-expand_task; // = task-master expand
-update_task; // = task-master update-task
-update_subtask; // = task-master update-subtask
-update; // = task-master update
+add_task; // = task-master-notion add-task
+expand_task; // = task-master-notion expand
+update_task; // = task-master-notion update-task
+update_subtask; // = task-master-notion update-subtask
+update; // = task-master-notion update
 
-// Analysis
-analyze_project_complexity; // = task-master analyze-complexity
-complexity_report; // = task-master complexity-report
+// Analysis & Scope Management
+analyze_project_complexity; // = task-master-notion analyze-complexity
+complexity_report; // = task-master-notion complexity-report
+scope_up; // = task-master-notion scope-up
+scope_down; // = task-master-notion scope-down
+
+// Notion Integration
+validate_notion_sync; // = task-master-notion validate-notion-sync
+repair_notion_db; // = task-master-notion repair-notion-db
+reset_notion_db; // = task-master-notion reset-notion-db
 ```
 
 ## Claude Code Workflow Integration
@@ -136,14 +153,14 @@ complexity_report; // = task-master complexity-report
 
 ```bash
 # Initialize Task Master
-task-master init
+task-master-notion init
 
 # Create or obtain PRD, then parse it
-task-master parse-prd .taskmaster/docs/prd.txt
+task-master-notion parse-prd .taskmaster/docs/prd.txt
 
 # Analyze complexity and expand tasks
-task-master analyze-complexity --research
-task-master expand --all --research
+task-master-notion analyze-complexity --research
+task-master-notion expand --all --research
 ```
 
 If tasks already exist, another PRD can be parsed (with new information only!) using parse-prd with --append flag. This will add the generated tasks to the existing list of tasks..
@@ -152,14 +169,14 @@ If tasks already exist, another PRD can be parsed (with new information only!) u
 
 ```bash
 # Start each session
-task-master next                           # Find next available task
-task-master show <id>                     # Review task details
+task-master-notion next                           # Find next available task
+task-master-notion show <id>                     # Review task details
 
 # During implementation, check in code context into the tasks and subtasks
-task-master update-subtask --id=<id> --prompt="implementation notes..."
+task-master-notion update-subtask --id=<id> --prompt="implementation notes..."
 
 # Complete tasks
-task-master set-status --id=<id> --status=done
+task-master-notion set-status --id=<id> --status=done
 ```
 
 #### 3. Multi-Claude Workflows
@@ -186,8 +203,8 @@ Find the next available Task Master task and show its details.
 
 Steps:
 
-1. Run `task-master next` to get the next task
-2. If a task is available, run `task-master show <id>` for full details
+1. Run `task-master-notion next` to get the next task
+2. If a task is available, run `task-master-notion show <id>` for full details
 3. Provide a summary of what needs to be implemented
 4. Suggest the first implementation step
 ```
@@ -199,11 +216,11 @@ Complete a Task Master task: $ARGUMENTS
 
 Steps:
 
-1. Review the current task with `task-master show $ARGUMENTS`
+1. Review the current task with `task-master-notion show $ARGUMENTS`
 2. Verify all implementation is complete
 3. Run any tests related to this task
-4. Mark as complete: `task-master set-status --id=$ARGUMENTS --status=done`
-5. Show the next available task with `task-master next`
+4. Mark as complete: `task-master-notion set-status --id=$ARGUMENTS --status=done`
+5. Show the next available task with `task-master-notion next`
 ```
 
 ## Tool Allowlist Recommendations
@@ -214,7 +231,7 @@ Add to `.claude/settings.json`:
 {
   "allowedTools": [
     "Edit",
-    "Bash(task-master *)",
+    "Bash(task-master-notion *)",
     "Bash(git commit:*)",
     "Bash(git add:*)",
     "Bash(npm run *)",

@@ -37,9 +37,14 @@
 		"mcp",
 		"context",
 		"notion",
-		"notion-integration"
+		"notion-integration",
+		"kanban",
+		"productivity",
+		"emoji-generation",
+		"hierarchy-sync",
+		"project-management"
 	],
-	"author": "chun92",
+	"author": "flosrn",
 	"license": "MIT WITH Commons-Clause",
 	"dependencies": {
 		"@ai-sdk/amazon-bedrock": "^2.2.9",
@@ -95,11 +100,11 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/chun92/claude-task-master.git"
+		"url": "git+https://github.com/flosrn/claude-task-master.git"
 	},
-	"homepage": "https://github.com/chun92/claude-task-master#readme",
+	"homepage": "https://github.com/flosrn/claude-task-master#readme",
 	"bugs": {
-		"url": "https://github.com/chun92/claude-task-master/issues"
+		"url": "https://github.com/flosrn/claude-task-master/issues"
 	},
 	"files": [
 		"scripts/**",
