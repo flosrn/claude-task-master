@@ -233,7 +233,7 @@ export function reconstructHierarchyFromNotion(
 
 	// First pass: index all tasks
 	for (const page of notionPages) {
-		const taskId = page.properties.taskid?.rich_text?.[0]?.plain_text;
+		const taskId = page.properties['Task Id']?.rich_text?.[0]?.plain_text;
 		if (!taskId) continue;
 
 		const task = {

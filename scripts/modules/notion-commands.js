@@ -83,7 +83,8 @@ export async function validateNotionSyncCommand(options = {}) {
 				report.duplicatesInNotion.length > 0 ||
 				report.missingInNotion.length > 0 ||
 				report.extraInNotion.length > 0 ||
-				report.mappingIssues.length > 0;
+				report.mappingIssues.length > 0 ||
+				(report.pagesWithoutTaskId && report.pagesWithoutTaskId > 0);
 
 			if (hasIssues) {
 				console.log('\n' + chalk.yellow('🔧 Found some sync differences:'));
@@ -129,6 +130,12 @@ export async function validateNotionSyncCommand(options = {}) {
 							);
 						}
 					}
+				}
+
+				if (report.pagesWithoutTaskId && report.pagesWithoutTaskId > 0) {
+					console.log(
+						`  ${chalk.red('⚠️')} ${report.pagesWithoutTaskId} pages in Notion without 'Task Id' property`
+					);
 				}
 
 				if (report.mappingIssues.length > 0) {
@@ -249,7 +256,7 @@ export async function repairNotionDBCommand(options = {}) {
 			// Detailed reporting
 			if (result.duplicatesFound > 0) {
 				console.log(
-					`\n${chalk.yellow('Duplicates:')} ${result.duplicatesFound} taskids had duplicates`
+					`\n${chalk.yellow('Duplicates:')} ${result.duplicatesFound} 'Task Id' values had duplicates`
 				);
 				if (!dryRun && result.duplicatesRemoved > 0) {
 					console.log(
@@ -297,7 +304,7 @@ export async function repairNotionDBCommand(options = {}) {
 
 			if (result.pagesWithoutTaskId > 0) {
 				console.log(
-					`\n${chalk.yellow('Warning:')} ${result.pagesWithoutTaskId} pages found without taskid property`
+					`\n${chalk.yellow('Warning:')} ${result.pagesWithoutTaskId} pages found without 'Task Id' property`
 				);
 			}
 

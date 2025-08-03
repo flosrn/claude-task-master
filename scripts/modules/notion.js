@@ -702,21 +702,44 @@ function splitRichTextByWord(content, chunkSize = 2000) {
 }
 
 // --- Notion-related API functions start here ---
+
+/**
+ * Maps TaskMaster status values to French Notion status options
+ * @param {string} status - TaskMaster status (pending, in-progress, completed, blocked, etc.)
+ * @returns {string} French status name for Notion
+ */
+function mapStatusToFrench(status) {
+	const statusMapping = {
+		pending: 'En attente',
+		'in-progress': 'En cours',
+		done: 'Terminé',
+		cancelled: 'Annulé',
+		deferred: 'Reporté',
+		review: 'En révision'
+	};
+
+	return statusMapping[status] || status; // Fallback to original if not found
+}
+
 // Notion property mapping function
 async function buildNotionProperties(task, tag, now = new Date()) {
 	// Date property logic
 	const dateProps = buildDateProperties(task, now);
 
 	return {
-		title: { title: splitRichTextByWord(task.title || '') },
-		description: { rich_text: splitRichTextByWord(task.description || '') },
-		details: { rich_text: splitRichTextByWord(task.details || '') },
-		testStrategy: { rich_text: splitRichTextByWord(task.testStrategy || '') },
-		taskid: { rich_text: splitRichTextByWord(String(task.id)) },
-		tag: { rich_text: splitRichTextByWord(tag) },
-		priority: task.priority ? { select: { name: task.priority } } : undefined,
-		status: task.status ? { status: { name: task.status } } : undefined,
-		complexity:
+		Titre: { title: splitRichTextByWord(task.title || '') },
+		Description: { rich_text: splitRichTextByWord(task.description || '') },
+		Détails: { rich_text: splitRichTextByWord(task.details || '') },
+		'Stratégie de Test': {
+			rich_text: splitRichTextByWord(task.testStrategy || '')
+		},
+		'Task Id': { rich_text: splitRichTextByWord(String(task.id)) },
+		Tag: { rich_text: splitRichTextByWord(tag) },
+		Priorité: task.priority ? { select: { name: task.priority } } : undefined,
+		status: task.status
+			? { status: { name: mapStatusToFrench(task.status) } }
+			: undefined,
+		Complexité:
 			task.complexity !== undefined ? { number: task.complexity } : undefined,
 		...dateProps
 	};
@@ -772,12 +795,12 @@ function buildNotionRelationProperties(task, tag, mapping) {
 
 	const props = {};
 	if (Array.isArray(task.dependencies)) {
-		props.dependencies = {
+		props['Dépendances'] = {
 			rich_text: buildRichTextLinks(task.dependencies, getPageUrl)
 		};
 	}
 	if (Array.isArray(task.subtasks)) {
-		props.subtasks = {
+		props['Sous-tâches'] = {
 			rich_text: buildRichTextLinks(task.subtasks, getPageUrl)
 		};
 	}
@@ -795,19 +818,19 @@ function buildNotionRelationProperties(task, tag, mapping) {
 function buildDateProperties(task, now = new Date()) {
 	const isoNow = now.toISOString();
 	const props = {};
-	// startDate: only update if status is in-progress
+	// Date de Début: only update if status is in-progress
 	if (task.status === 'in-progress') {
-		props.startDate = { date: { start: isoNow } };
+		props['Date de Début'] = { date: { start: isoNow } };
 	} else if (task.startDate) {
 		// preserve existing if present
-		props.startDate = { date: { start: task.startDate } };
+		props['Date de Début'] = { date: { start: task.startDate } };
 	}
-	// endDate: only update if status is done or cancelled
+	// Date de Fin: only update if status is done or cancelled
 	if (task.status === 'done' || task.status === 'cancelled') {
-		props.endDate = { date: { start: isoNow } };
+		props['Date de Fin'] = { date: { start: isoNow } };
 	} else if (task.endDate) {
 		// preserve existing if present
-		props.endDate = { date: { start: task.endDate } };
+		props['Date de Fin'] = { date: { start: task.endDate } };
 	}
 	return props;
 }
@@ -1450,8 +1473,8 @@ async function syncTasksWithNotion(prevTasks, curTasks, projectRoot) {
 }
 
 /**
- * Repairs Notion DB by removing duplicate tasks based on taskid property.
- * Keeps the most recently created page for each unique taskid.
+ * Repairs Notion DB by removing duplicate tasks based on 'Task Id' property.
+ * Keeps the most recently created page for each unique 'Task Id'.
  * @param {string} projectRoot - Project root directory
  * @param {Object} options - Options { dryRun: boolean, forceSync: boolean }
  * @returns {Promise<Object>} Result with removed duplicates count and details
@@ -1476,13 +1499,13 @@ async function repairNotionDuplicates(projectRoot, options = {}) {
 		const allPages = await fetchAllNotionPages();
 		logger.info(`Found ${allPages.length} total pages in Notion DB`);
 
-		// 2. Group pages by taskid to identify duplicates
+		// 2. Group pages by 'Task Id' to identify duplicates
 		const pagesByTaskId = new Map();
 		const pagesWithoutTaskId = [];
 
 		for (const page of allPages) {
 			const taskIdProperty =
-				page.properties?.taskid?.rich_text?.[0]?.text?.content;
+				page.properties?.['Task Id']?.rich_text?.[0]?.text?.content;
 			if (taskIdProperty) {
 				const taskId = taskIdProperty.trim();
 				if (!pagesByTaskId.has(taskId)) {
@@ -1494,7 +1517,7 @@ async function repairNotionDuplicates(projectRoot, options = {}) {
 			}
 		}
 
-		// 3. Identify duplicates (taskids with more than one page)
+		// 3. Identify duplicates ('Task Id' values with more than one page)
 		const duplicates = new Map();
 		let totalDuplicatePages = 0;
 
@@ -1506,11 +1529,11 @@ async function repairNotionDuplicates(projectRoot, options = {}) {
 		}
 
 		logger.info(
-			`Found ${duplicates.size} taskids with duplicates (${totalDuplicatePages} pages to remove)`
+			`Found ${duplicates.size} 'Task Id' values with duplicates (${totalDuplicatePages} pages to remove)`
 		);
 		if (pagesWithoutTaskId.length > 0) {
 			logger.warn(
-				`Found ${pagesWithoutTaskId.length} pages without taskid property`
+				`Found ${pagesWithoutTaskId.length} pages without 'Task Id' property`
 			);
 		}
 
@@ -1713,17 +1736,17 @@ async function forceFullNotionSync(projectRoot) {
 			`[NOTION] Found ${notionPages.length} existing pages in Notion`
 		);
 
-		// 3. Build a mapping of taskid -> notion page ID for existing pages
+		// 3. Build a mapping of 'Task Id' -> notion page ID for existing pages
 		const existingTaskIdToPageId = new Map();
 		for (const page of notionPages) {
 			const taskId =
-				page.properties?.taskid?.rich_text?.[0]?.text?.content?.trim();
+				page.properties?.['Task Id']?.rich_text?.[0]?.text?.content?.trim();
 			if (taskId) {
 				existingTaskIdToPageId.set(taskId, page.id);
 			}
 		}
 		logger.info(
-			`[NOTION] Found ${existingTaskIdToPageId.size} pages with valid taskids`
+			`[NOTION] Found ${existingTaskIdToPageId.size} pages with valid 'Task Id' property`
 		);
 
 		// 4. Build a new mapping based on existing pages
@@ -1842,7 +1865,7 @@ async function validateNotionSync(projectRoot) {
 
 		for (const page of notionPages) {
 			const taskId =
-				page.properties?.taskid?.rich_text?.[0]?.text?.content?.trim();
+				page.properties?.['Task Id']?.rich_text?.[0]?.text?.content?.trim();
 			if (taskId) {
 				notionTaskIds.add(taskId);
 				if (!notionPagesByTaskId.has(taskId)) {
@@ -1884,10 +1907,11 @@ async function validateNotionSync(projectRoot) {
 			taskmasterTaskCount: localTasks.size,
 			mainTaskCount,
 			subtaskCount,
-			notionPageCount: notionPages.length,
+			notionPageCount: notionTaskIds.size, // Use only pages with valid 'Task Id' for comparison
 			notionMainTaskCount,
 			notionSubtaskCount,
 			notionTaskIdCount: notionTaskIds.size,
+			pagesWithoutTaskId: pagesWithoutTaskId.length, // Track pages without Task Id separately
 			duplicatesInNotion: [],
 			missingInNotion: [],
 			extraInNotion: [],
@@ -1912,14 +1936,14 @@ async function validateNotionSync(projectRoot) {
 			}
 		}
 
-		// Find extra tasks in Notion DB (including pages without taskid)
+		// Find extra tasks in Notion DB (including pages without 'Task Id')
 		for (const taskId of notionTaskIds) {
 			if (!localTasks.has(taskId)) {
 				report.extraInNotion.push(taskId);
 			}
 		}
 
-		// Add pages without taskid as extra entries (using page titles or IDs)
+		// Add pages without 'Task Id' as extra entries (using page titles or IDs)
 		for (const page of pagesWithoutTaskId) {
 			const pageTitle =
 				page.properties?.title?.title?.[0]?.text?.content ||
@@ -2289,14 +2313,14 @@ async function repairNotionDB(projectRoot, options = {}) {
 			`Found ${localTasks.size} TaskMaster tasks and ${notionPages.length} Notion DB tasks`
 		);
 
-		// Group Notion pages by taskid
+		// Group Notion pages by 'Task Id'
 		const pagesByTaskId = new Map();
 		const pagesWithoutTaskId = [];
 		const notionTaskIds = new Set();
 
 		for (const page of notionPages) {
 			const taskIdProperty =
-				page.properties?.taskid?.rich_text?.[0]?.text?.content;
+				page.properties?.['Task Id']?.rich_text?.[0]?.text?.content;
 			if (taskIdProperty) {
 				const taskId = taskIdProperty.trim();
 				notionTaskIds.add(taskId);
@@ -2645,7 +2669,7 @@ async function repairNotionDB(projectRoot, options = {}) {
 			}
 		}
 
-		// Also consider pages without taskid as extra tasks to be cleaned up
+		// Also consider pages without 'Task Id' as extra tasks to be cleaned up
 		const extraTasksWithoutId = pagesWithoutTaskId.length;
 		const totalExtraTasks = extraTasks.length + extraTasksWithoutId;
 
@@ -2656,12 +2680,12 @@ async function repairNotionDB(projectRoot, options = {}) {
 			if (preserveExtraTasks) {
 				if (extraTasks.length > 0) {
 					logger.warn(
-						`Found ${extraTasks.length} extra tasks with taskid in Notion DB (preserved due to --preserve-extra-tasks option)`
+						`Found ${extraTasks.length} extra tasks with 'Task Id' in Notion DB (preserved due to --preserve-extra-tasks option)`
 					);
 				}
 				if (extraTasksWithoutId > 0) {
 					logger.warn(
-						`Found ${extraTasksWithoutId} tasks without taskid in Notion DB (preserved due to --preserve-extra-tasks option)`
+						`Found ${extraTasksWithoutId} tasks without 'Task Id' in Notion DB (preserved due to --preserve-extra-tasks option)`
 					);
 				}
 			} else {
@@ -2670,26 +2694,26 @@ async function repairNotionDB(projectRoot, options = {}) {
 				);
 				if (extraTasks.length > 0) {
 					logger.info(
-						`  - ${extraTasks.length} tasks with taskid: ${extraTasks.slice(0, 5).join(', ')}${extraTasks.length > 5 ? '...' : ''}`
+						`  - ${extraTasks.length} tasks with 'Task Id': ${extraTasks.slice(0, 5).join(', ')}${extraTasks.length > 5 ? '...' : ''}`
 					);
 				}
 				if (extraTasksWithoutId > 0) {
 					logger.info(
-						`  - ${extraTasksWithoutId} tasks without taskid property`
+						`  - ${extraTasksWithoutId} tasks without 'Task Id' property`
 					);
 				}
 
 				if (!dryRun) {
-					// Find pages to remove (both extra tasks with taskid and pages without taskid)
+					// Find pages to remove (both extra tasks with 'Task Id' and pages without 'Task Id')
 					const pagesToRemove = [];
 
-					// Add pages with extra taskids
+					// Add pages with extra 'Task Id' values
 					for (const taskId of extraTasks) {
 						const pages = pagesByTaskId.get(taskId) || [];
 						pagesToRemove.push(...pages);
 					}
 
-					// Add pages without taskid
+					// Add pages without 'Task Id'
 					pagesToRemove.push(...pagesWithoutTaskId);
 
 					if (pagesToRemove.length > 0) {
@@ -2717,12 +2741,12 @@ async function repairNotionDB(projectRoot, options = {}) {
 					);
 					if (extraTasks.length > 0) {
 						logger.info(
-							`  - Tasks with taskid: ${extraTasks.slice(0, 10).join(', ')}${extraTasks.length > 10 ? '...' : ''}`
+							`  - Tasks with 'Task Id': ${extraTasks.slice(0, 10).join(', ')}${extraTasks.length > 10 ? '...' : ''}`
 						);
 					}
 					if (extraTasksWithoutId > 0) {
 						logger.info(
-							`  - ${extraTasksWithoutId} tasks without taskid property`
+							`  - ${extraTasksWithoutId} tasks without 'Task Id' property`
 						);
 					}
 				}
