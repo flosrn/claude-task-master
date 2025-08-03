@@ -890,7 +890,10 @@ async function addTaskToNotion(
 	const properties = await buildNotionProperties(task, tag);
 
 	// Add dependencies as rich_text if no relation property is available
-	if (!hierarchyCapabilities?.hasDependencyRelation && task.dependencies?.length > 0) {
+	if (
+		!hierarchyCapabilities?.hasDependencyRelation &&
+		task.dependencies?.length > 0
+	) {
 		const relationProps = buildNotionRelationProperties(task, tag, mapping);
 		Object.assign(properties, relationProps);
 	}
@@ -923,7 +926,8 @@ async function addTaskToNotion(
 			.filter((notionId) => notionId);
 
 		if (dependencyIds.length > 0) {
-			const dependencyRelationName = hierarchyCapabilities?.dependencyRelationName || 'Dependencies Tasks';
+			const dependencyRelationName =
+				hierarchyCapabilities?.dependencyRelationName || 'Dependencies Tasks';
 			properties[dependencyRelationName] = {
 				relation: dependencyIds.map((id) => ({ id }))
 			};
@@ -971,13 +975,16 @@ async function updateTaskInNotion(
 	const notionId = getNotionPageId(mapping, tag, task.id);
 	if (!notionId) throw new Error('Notion page id not found for update');
 	const properties = await buildNotionProperties(task, tag);
-	
+
 	// Add dependencies as rich_text if no relation property is available
-	if (!hierarchyCapabilities?.hasDependencyRelation && task.dependencies?.length > 0) {
+	if (
+		!hierarchyCapabilities?.hasDependencyRelation &&
+		task.dependencies?.length > 0
+	) {
 		const relationProps = buildNotionRelationProperties(task, tag, mapping);
 		Object.assign(properties, relationProps);
 	}
-	
+
 	const icon = await generateTaskIcon(task, projectRoot);
 	await executeWithRetry(() =>
 		notion.pages.update({
@@ -2545,7 +2552,8 @@ async function repairNotionDB(projectRoot, options = {}) {
 								useDependencyRelations:
 									hierarchyCapabilities.hasDependencyRelations,
 								dependencyRelationName:
-									hierarchyCapabilities.dependencyRelationName || 'Dependencies Tasks'
+									hierarchyCapabilities.dependencyRelationName ||
+									'Dependencies Tasks'
 							}
 						);
 					}
@@ -2568,27 +2576,36 @@ async function repairNotionDB(projectRoot, options = {}) {
 		}
 
 		// Phase 4: Update all task properties (including dependencies rich_text)
-		logger.info('Phase 4: Updating all task properties to ensure complete synchronization...');
-		
+		logger.info(
+			'Phase 4: Updating all task properties to ensure complete synchronization...'
+		);
+
 		let propertiesUpdated = 0;
 		const taskUpdateErrors = [];
-		
+
 		for (const [taskId, task] of localTasks) {
 			const notionPageIds = pagesByTaskId.get(taskId);
 			if (notionPageIds && notionPageIds.length > 0) {
 				const notionPage = notionPageIds[0]; // Use the first (and should be only) page
-				
+
 				try {
 					if (!dryRun) {
 						// Build complete properties including dependencies
 						const properties = await buildNotionProperties(task, tag);
-						
+
 						// Add dependencies as rich_text if no relation property is available
-						if (!hierarchyCapabilities?.hasDependencyRelation && task.dependencies?.length > 0) {
-							const relationProps = buildNotionRelationProperties(task, tag, mapping);
+						if (
+							!hierarchyCapabilities?.hasDependencyRelation &&
+							task.dependencies?.length > 0
+						) {
+							const relationProps = buildNotionRelationProperties(
+								task,
+								tag,
+								mapping
+							);
 							Object.assign(properties, relationProps);
 						}
-						
+
 						// Update the page with all properties
 						await executeWithRetry(() =>
 							notion.pages.update({
@@ -2596,7 +2613,7 @@ async function repairNotionDB(projectRoot, options = {}) {
 								properties
 							})
 						);
-						
+
 						propertiesUpdated++;
 						logger.debug(`✓ Updated properties for task ${taskId}`);
 					} else {
@@ -2604,12 +2621,15 @@ async function repairNotionDB(projectRoot, options = {}) {
 						propertiesUpdated++;
 					}
 				} catch (error) {
-					logger.error(`✗ Failed to update properties for task ${taskId}:`, error.message);
+					logger.error(
+						`✗ Failed to update properties for task ${taskId}:`,
+						error.message
+					);
 					taskUpdateErrors.push({ taskId, error: error.message });
 				}
 			}
 		}
-		
+
 		logger.info(`Updated properties for ${propertiesUpdated} tasks`);
 		if (taskUpdateErrors.length > 0) {
 			logger.warn(`Failed to update ${taskUpdateErrors.length} tasks`);

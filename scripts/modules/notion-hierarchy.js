@@ -77,7 +77,11 @@ export async function updateHierarchicalRelations(
 	notion,
 	options = {}
 ) {
-	const { debug = false, useDependencyRelations = false, dependencyRelationName = 'Dependencies Tasks' } = options;
+	const {
+		debug = false,
+		useDependencyRelations = false,
+		dependencyRelationName = 'Dependencies Tasks'
+	} = options;
 	let updatedCount = 0;
 	let errors = [];
 
@@ -218,7 +222,11 @@ export function checkRelationProperties(database) {
  * @param {string} dependencyRelationName - Name of the dependency relation property
  * @returns {Object} Reconstructed hierarchical structure
  */
-export function reconstructHierarchyFromNotion(notionPages, tag, dependencyRelationName = 'Dependencies Tasks') {
+export function reconstructHierarchyFromNotion(
+	notionPages,
+	tag,
+	dependencyRelationName = 'Dependencies Tasks'
+) {
 	const hierarchy = {};
 	const tasksByNotionId = new Map();
 	const tasksByTaskMasterId = new Map();

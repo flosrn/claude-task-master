@@ -19,14 +19,17 @@ const __dirname = path.dirname(__filename);
 export function runTaskMasterCommand(commandArgs, cwd = process.cwd()) {
 	try {
 		// Path to the task-master binary
-		const taskMasterPath = path.resolve(__dirname, '../../../bin/task-master.js');
-		
+		const taskMasterPath = path.resolve(
+			__dirname,
+			'../../../bin/task-master.js'
+		);
+
 		const result = spawnSync('node', [taskMasterPath, ...commandArgs], {
 			cwd,
 			encoding: 'utf8',
-			env: { ...process.env },
+			env: { ...process.env }
 		});
-		
+
 		return {
 			success: result.status === 0,
 			stdout: result.stdout || '',
