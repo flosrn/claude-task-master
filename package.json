@@ -100,11 +100,11 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/flosrn/claude-task-master.git"
+		"url": "git+https://github.com/flosrn/claude-task-master-notion.git"
 	},
-	"homepage": "https://github.com/flosrn/claude-task-master#readme",
+	"homepage": "https://github.com/flosrn/claude-task-master-notion#readme",
 	"bugs": {
-		"url": "https://github.com/flosrn/claude-task-master/issues"
+		"url": "https://github.com/flosrn/claude-task-master-notion/issues"
 	},
 	"files": [
 		"scripts/**",
