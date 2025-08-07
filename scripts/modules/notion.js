@@ -8,7 +8,7 @@ import {
 } from '../../src/constants/paths.js';
 import { currentTaskMaster } from '../../src/task-master.js';
 import { getCurrentTag, log, readJSON } from './utils.js';
-import { generateTaskEmoji } from './notion-emoji-ai.js';
+import { generateSimpleTaskEmoji } from './simple-emoji-generator.js';
 import {
 	buildHierarchicalRelations,
 	updateHierarchicalRelations,
@@ -750,90 +750,15 @@ async function buildNotionProperties(task, tag, now = new Date()) {
 
 // Generate emoji for task icon (separate from properties)
 async function generateTaskIcon(task, projectRoot = process.cwd()) {
-	let taskEmoji = '📋'; // Default emoji
-	
 	try {
-		// Use Claude Code via TaskMaster if available
-		const generatedEmoji = await generateTaskEmoji(task, projectRoot, null);
-		
-		if (generatedEmoji && generatedEmoji.trim()) {
-			// Normalize the AI-generated emoji for Notion compatibility
-			const normalizedEmoji = normalizeEmojiForNotion(generatedEmoji);
-			taskEmoji = normalizedEmoji;
-			log('debug', `[EMOJI] Generated "${generatedEmoji}" → normalized to "${normalizedEmoji}" for task ${task.id}`);
-		}
+		const taskEmoji = await generateSimpleTaskEmoji(task);
+		return { type: 'emoji', emoji: taskEmoji };
 	} catch (error) {
-		log(
-			'warn',
-			`[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}, using default`
-		);
+		log('warn', `[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}, using fallback`);
+		return { type: 'emoji', emoji: '📋' };
 	}
-	
-	return { type: 'emoji', emoji: taskEmoji };
 }
 
-// Normalize AI-generated emojis for Notion compatibility
-function normalizeEmojiForNotion(emoji) {
-	// Map common AI-generated emojis to Notion-compatible versions
-	const emojiMap = {
-		// Remove variation selectors (most common issue)
-		'⚡️': '⚡',
-		'⭐️': '⭐',
-		'🔥': '🔥',
-		'✨': '✨',
-		'🚀': '🚀',
-		'💡': '💡',
-		'🛠️': '🛠',
-		'⚙️': '⚙',
-		'📱': '📱',
-		'💻': '💻',
-		'🖥️': '🖥',
-		'⌨️': '⌨',
-		'🖱️': '🖱',
-		'🖨️': '🖨',
-		'📄': '📄',
-		'📊': '📊',
-		'📈': '📈',
-		'📉': '📉',
-		'🗂️': '🗂',
-		'📂': '📂',
-		'📁': '📁',
-		'🗃️': '🗃',
-		'🗄️': '🗄',
-		'📋': '📋',
-		'📌': '📌',
-		'📍': '📍',
-		'🔧': '🔧',
-		'🔨': '🔨',
-		'⛏️': '⛏',
-		'🛡️': '🛡',
-		'🔒': '🔒',
-		'🔓': '🔓',
-		'🔑': '🔑',
-		'🗝️': '🗝',
-		'🎯': '🎯',
-		'🎪': '🎪',
-		'🎨': '🎨',
-		'🎭': '🎭',
-		'🎪': '🎪'
-	};
-	
-	// Check if we have a mapping for this emoji
-	if (emojiMap[emoji]) {
-		return emojiMap[emoji];
-	}
-	
-	// Remove common variation selectors that cause issues
-	const cleanedEmoji = emoji.replace(/\uFE0F/g, '');
-	
-	// Fallback to a safe emoji if it's a complex/compound emoji
-	if (cleanedEmoji.length > 2 || /[\u200D]/.test(cleanedEmoji)) {
-		log('debug', `[EMOJI] Complex emoji "${emoji}" simplified to default`);
-		return '📋';
-	}
-	
-	return cleanedEmoji || '📋';
-}
 
 /**
  * Generate formatted content for Notion page body
