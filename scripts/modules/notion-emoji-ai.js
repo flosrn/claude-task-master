@@ -4,6 +4,7 @@
  */
 
 import { generateTextService } from './ai-services-unified.js';
+import { generateTaskEmojiWithFallback } from './emoji-fallback-system.js';
 import { log } from './utils.js';
 
 /**
@@ -21,8 +22,21 @@ const emojiCache = new Map();
 export async function generateTaskEmoji(
 	task,
 	projectRoot = process.cwd(),
-	session = null
+	session = null,
+	options = {}
 ) {
+	// Utiliser le nouveau système de fallback intelligent
+	if (options.useAdvancedFallback !== false) {
+		log('debug', `[EMOJI] Using advanced fallback system for: ${task.title}`);
+		return await generateTaskEmojiWithFallback(
+			task,
+			projectRoot,
+			session,
+			options
+		);
+	}
+
+	// Garde l'ancien système pour compatibilité backwards
 	try {
 		// Create a cache key based on task content
 		const cacheKey = generateCacheKey(task);
@@ -66,9 +80,15 @@ export async function generateTaskEmoji(
 	} catch (error) {
 		log(
 			'warn',
-			`[EMOJI] Failed to generate emoji for task ${task.title}: ${error.message}`
+			`[EMOJI] Legacy system failed for task ${task.title}: ${error.message}, trying fallback...`
 		);
-		return getDefaultEmoji(task);
+		// Fallback vers le nouveau système si l'ancien échoue
+		return await generateTaskEmojiWithFallback(
+			task,
+			projectRoot,
+			session,
+			options
+		);
 	}
 }
 
