@@ -1487,7 +1487,8 @@ function registerCommands(programInstance) {
 					projectRoot: taskMaster.getProjectRoot(),
 					tag,
 					commandName: 'scope-up',
-					outputType: 'cli'
+					outputType: 'cli',
+					research: options.research || false
 				};
 
 				const result = await scopeUpTask(
@@ -1613,7 +1614,8 @@ function registerCommands(programInstance) {
 					projectRoot: taskMaster.getProjectRoot(),
 					tag,
 					commandName: 'scope-down',
-					outputType: 'cli'
+					outputType: 'cli',
+					research: options.research || false
 				};
 
 				const result = await scopeDownTask(
