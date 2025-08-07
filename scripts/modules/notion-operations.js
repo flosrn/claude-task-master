@@ -5,6 +5,7 @@
 
 import fs from 'fs';
 import { log } from './utils.js';
+import { buildNotionPageContent } from './notion.js';
 
 /**
  * Base class for all transactional operations
@@ -207,9 +208,13 @@ export class CreatePagesOperation extends BaseOperation {
 	async createPage(taskInfo) {
 		const { task, properties } = taskInfo;
 
+		// Generate formatted content for the page
+		const pageContent = buildNotionPageContent(task);
+
 		const pageData = {
 			parent: { database_id: this.databaseId },
-			properties: properties
+			properties: properties,
+			children: pageContent
 		};
 
 		const createdPage = await this.notion.pages.create(pageData);

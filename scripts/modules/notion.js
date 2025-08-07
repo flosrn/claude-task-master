@@ -726,13 +726,16 @@ async function buildNotionProperties(task, tag, now = new Date()) {
 	// Date property logic
 	const dateProps = buildDateProperties(task, now);
 
+	// Generate task summary from description (first 100 chars)
+	const taskSummary = task.description ? 
+		(task.description.length > 100 ? 
+			task.description.substring(0, 97) + '...' : 
+			task.description) : 
+		'';
+
 	return {
 		Titre: { title: splitRichTextByWord(task.title || '') },
-		Description: { rich_text: splitRichTextByWord(task.description || '') },
-		Détails: { rich_text: splitRichTextByWord(task.details || '') },
-		'Stratégie de Test': {
-			rich_text: splitRichTextByWord(task.testStrategy || '')
-		},
+		Description: { rich_text: splitRichTextByWord(taskSummary) },
 		'Task Id': { rich_text: splitRichTextByWord(String(task.id)) },
 		Tag: { rich_text: splitRichTextByWord(tag) },
 		Priorité: task.priority ? { select: { name: task.priority } } : undefined,
@@ -748,16 +751,187 @@ async function buildNotionProperties(task, tag, now = new Date()) {
 // Generate emoji for task icon (separate from properties)
 async function generateTaskIcon(task, projectRoot = process.cwd()) {
 	let taskEmoji = '📋'; // Default emoji
+	
 	try {
 		// Use Claude Code via TaskMaster if available
-		taskEmoji = await generateTaskEmoji(task, projectRoot, null);
+		const generatedEmoji = await generateTaskEmoji(task, projectRoot, null);
+		
+		if (generatedEmoji && generatedEmoji.trim()) {
+			// Normalize the AI-generated emoji for Notion compatibility
+			const normalizedEmoji = normalizeEmojiForNotion(generatedEmoji);
+			taskEmoji = normalizedEmoji;
+			log('debug', `[EMOJI] Generated "${generatedEmoji}" → normalized to "${normalizedEmoji}" for task ${task.id}`);
+		}
 	} catch (error) {
 		log(
 			'warn',
-			`[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}`
+			`[EMOJI] Failed to generate emoji for task ${task.id}: ${error.message}, using default`
 		);
 	}
+	
 	return { type: 'emoji', emoji: taskEmoji };
+}
+
+// Normalize AI-generated emojis for Notion compatibility
+function normalizeEmojiForNotion(emoji) {
+	// Map common AI-generated emojis to Notion-compatible versions
+	const emojiMap = {
+		// Remove variation selectors (most common issue)
+		'⚡️': '⚡',
+		'⭐️': '⭐',
+		'🔥': '🔥',
+		'✨': '✨',
+		'🚀': '🚀',
+		'💡': '💡',
+		'🛠️': '🛠',
+		'⚙️': '⚙',
+		'📱': '📱',
+		'💻': '💻',
+		'🖥️': '🖥',
+		'⌨️': '⌨',
+		'🖱️': '🖱',
+		'🖨️': '🖨',
+		'📄': '📄',
+		'📊': '📊',
+		'📈': '📈',
+		'📉': '📉',
+		'🗂️': '🗂',
+		'📂': '📂',
+		'📁': '📁',
+		'🗃️': '🗃',
+		'🗄️': '🗄',
+		'📋': '📋',
+		'📌': '📌',
+		'📍': '📍',
+		'🔧': '🔧',
+		'🔨': '🔨',
+		'⛏️': '⛏',
+		'🛡️': '🛡',
+		'🔒': '🔒',
+		'🔓': '🔓',
+		'🔑': '🔑',
+		'🗝️': '🗝',
+		'🎯': '🎯',
+		'🎪': '🎪',
+		'🎨': '🎨',
+		'🎭': '🎭',
+		'🎪': '🎪'
+	};
+	
+	// Check if we have a mapping for this emoji
+	if (emojiMap[emoji]) {
+		return emojiMap[emoji];
+	}
+	
+	// Remove common variation selectors that cause issues
+	const cleanedEmoji = emoji.replace(/\uFE0F/g, '');
+	
+	// Fallback to a safe emoji if it's a complex/compound emoji
+	if (cleanedEmoji.length > 2 || /[\u200D]/.test(cleanedEmoji)) {
+		log('debug', `[EMOJI] Complex emoji "${emoji}" simplified to default`);
+		return '📋';
+	}
+	
+	return cleanedEmoji || '📋';
+}
+
+/**
+ * Generate formatted content for Notion page body
+ * @param {Object} task - TaskMaster task object
+ * @returns {Array} Array of Notion block objects
+ */
+function buildNotionPageContent(task) {
+	const blocks = [];
+
+	// Description section
+	if (task.description) {
+		blocks.push({
+			object: 'block',
+			type: 'heading_2',
+			heading_2: {
+				rich_text: [{ type: 'text', text: { content: '📝 Description' } }]
+			}
+		});
+		
+		// Split description into paragraphs for better formatting
+		const descriptionParagraphs = task.description.split('\n').filter(p => p.trim());
+		descriptionParagraphs.forEach(paragraph => {
+			blocks.push({
+				object: 'block',
+				type: 'paragraph',
+				paragraph: {
+					rich_text: [{ type: 'text', text: { content: paragraph.trim() } }]
+				}
+			});
+		});
+	}
+
+	// Details section
+	if (task.details) {
+		blocks.push({
+			object: 'block',
+			type: 'heading_2',
+			heading_2: {
+				rich_text: [{ type: 'text', text: { content: '🔍 Détails' } }]
+			}
+		});
+		
+		const detailsParagraphs = task.details.split('\n').filter(p => p.trim());
+		detailsParagraphs.forEach(paragraph => {
+			blocks.push({
+				object: 'block',
+				type: 'paragraph',
+				paragraph: {
+					rich_text: [{ type: 'text', text: { content: paragraph.trim() } }]
+				}
+			});
+		});
+	}
+
+	// Test Strategy section
+	if (task.testStrategy) {
+		blocks.push({
+			object: 'block',
+			type: 'heading_2',
+			heading_2: {
+				rich_text: [{ type: 'text', text: { content: '🧪 Stratégie de Test' } }]
+			}
+		});
+		
+		const testStrategyParagraphs = task.testStrategy.split('\n').filter(p => p.trim());
+		testStrategyParagraphs.forEach(paragraph => {
+			blocks.push({
+				object: 'block',
+				type: 'paragraph',
+				paragraph: {
+					rich_text: [{ type: 'text', text: { content: paragraph.trim() } }]
+				}
+			});
+		});
+	}
+
+	// Dependencies section (if any)
+	if (task.dependencies && task.dependencies.length > 0) {
+		blocks.push({
+			object: 'block',
+			type: 'heading_3',
+			heading_3: {
+				rich_text: [{ type: 'text', text: { content: '🔗 Dépendances' } }]
+			}
+		});
+		
+		task.dependencies.forEach(dep => {
+			blocks.push({
+				object: 'block',
+				type: 'bulleted_list_item',
+				bulleted_list_item: {
+					rich_text: [{ type: 'text', text: { content: `Tâche ${dep}` } }]
+				}
+			});
+		});
+	}
+
+	return blocks;
 }
 
 /**
@@ -963,13 +1137,23 @@ async function addTaskToNotion(
 	// Generate task icon for page
 	const icon = await generateTaskIcon(task, projectRoot);
 
-	// Create page with all properties (including relations) and icon
+	// Generate formatted content for the page
+	const pageContent = buildNotionPageContent(task);
+
+	// Create page with all properties (including relations), icon, and formatted content
+	const pageData = {
+		parent: { database_id: NOTION_DATABASE_ID },
+		properties,
+		children: pageContent
+	};
+	
+	// Only add icon if generated
+	if (icon) {
+		pageData.icon = icon;
+	}
+
 	const pageResponse = await executeWithRetry(() =>
-		notion.pages.create({
-			parent: { database_id: NOTION_DATABASE_ID },
-			properties,
-			icon
-		})
+		notion.pages.create(pageData)
 	);
 
 	// Update mapping
@@ -1009,12 +1193,19 @@ async function updateTaskInNotion(
 	}
 
 	const icon = await generateTaskIcon(task, projectRoot);
+	
+	const updateData = {
+		page_id: notionId,
+		properties
+	};
+	
+	// Only add icon if generated
+	if (icon) {
+		updateData.icon = icon;
+	}
+	
 	await executeWithRetry(() =>
-		notion.pages.update({
-			page_id: notionId,
-			properties,
-			icon
-		})
+		notion.pages.update(updateData)
 	);
 	saveNotionSyncMapping(mapping, meta, mappingFile);
 }
@@ -2895,5 +3086,6 @@ export {
 	getNotionClient,
 	getIsNotionEnabled,
 	fetchAllNotionPages,
-	generateTaskIcon
+	generateTaskIcon,
+	buildNotionPageContent
 };
